@@ -365,6 +365,10 @@ export default class AdminReport extends Component {
       Object.assign(args, customFilters);
     }
 
+    if (this.options?.hiddenLabels?.length) {
+      args.hidden_labels = this.options.hiddenLabels.join(",");
+    }
+
     exportEntity("report", args).then(outputExportResult);
   }
 
