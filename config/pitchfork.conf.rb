@@ -73,10 +73,25 @@ after_mold_fork do |server, mold|
   Discourse.before_fork
 end
 
+oob_gc_enabled = false
+
 after_worker_fork do |server, worker|
   DiscourseEvent.trigger(:web_fork_started)
   Discourse.after_fork
   SignalTrapLogger.instance.after_fork
+
+  if ENV["DISCOURSE_DISABLE_MAJOR_GC_DURING_REQUESTS"]
+    begin
+      GC.config(rgengc_allow_full_mark: false)
+      oob_gc_enabled = true
+    rescue ArgumentError
+      # Ruby version doesn't support rgengc_allow_full_mark, silently skip
+    end
+  end
+end
+
+after_request_complete do |_server, _worker, _rack_env|
+  GC.start if oob_gc_enabled && GC.latest_gc_info(:need_major_by)
 end
 
 before_service_worker_ready do |server, service_worker|
