@@ -2,107 +2,77 @@ import { tracked } from "@glimmer/tracking";
 import Controller from "@ember/controller";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
-import { compare } from "@ember/utils";
 import { Promise } from "rsvp";
+import { ajax } from "discourse/lib/ajax";
 import { popupAjaxError } from "discourse/lib/ajax-error";
+import discourseDebounce from "discourse/lib/debounce";
 import { bind } from "discourse/lib/decorators";
+import { INPUT_DELAY } from "discourse/lib/environment";
+import getURL from "discourse/lib/get-url";
+import { applyQueryParams } from "discourse/lib/url";
 import { i18n } from "discourse-i18n";
 
 export default class PluginsExplorerController extends Controller {
   @service dialog;
-  @service appEvents;
   @service router;
-  @service toasts;
+  @service store;
 
   @tracked sortByProperty = "last_run_at";
   @tracked sortDescending = true;
   @tracked params;
-  @tracked createFormData = { name: "" };
-  @tracked showCreate;
   @tracked loading = false;
+  @tracked searchLoading = false;
+  @tracked queryTags = [];
+  @tracked tags = "";
 
-  queryParams = ["id"];
+  queryParams = ["id", "tags"];
   explain = false;
   acceptedImportFileTypes = ["application/json"];
   order = null;
   form = null;
-
-  get sortedQueries() {
-    const sortedQueries = this.model.content.toSorted((a, b) =>
-      compare(a?.[this.sortByProperty], b?.[this.sortByProperty])
-    );
-    return this.sortDescending ? sortedQueries.reverse() : sortedQueries;
-  }
+  #latestQueryRequest;
+  _currentFilter = "";
 
   get parsedParams() {
     return this.params ? JSON.parse(this.params) : null;
   }
 
+  get fetchParams() {
+    const params = {};
+    if (this._currentFilter) {
+      params.filter = this._currentFilter;
+    }
+    if (this.currentTags.length) {
+      params.tags = this.currentTags.join(",");
+    }
+    if (this.sortByProperty !== "last_run_at") {
+      params.order = this.sortByProperty;
+    }
+    if (!this.sortDescending) {
+      params.ascending = "true";
+    }
+    return params;
+  }
+
+  get hasTagFilter() {
+    return this.currentTags.length > 0;
+  }
+
+  get currentTags() {
+    return this.tags ? this.tags.split(",") : [];
+  }
+
+  get textFilter() {
+    return this._currentFilter;
+  }
+
+  get tagSelection() {
+    return this.currentTags.map((tag) => ({ id: tag, name: tag }));
+  }
+
   addCreatedRecord(record) {
     this.model.content.push(record);
-    this.router.transitionTo("adminPlugins.show.explorer.details", record.id);
-  }
-
-  async _importQuery(file) {
-    const json = await this._readFileAsTextAsync(file);
-    const query = this._parseQuery(json);
-    const record = this.store.createRecord("query", query);
-    const response = await record.save();
-    return response.target;
-  }
-
-  _parseQuery(json) {
-    const parsed = JSON.parse(json);
-    const query = parsed.query;
-    if (!query || !query.sql) {
-      throw new TypeError();
-    }
-    query.id = 0; // 0 means no Id yet
-    return query;
-  }
-
-  _readFileAsTextAsync(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        resolve(reader.result);
-      };
-      reader.onerror = reject;
-
-      reader.readAsText(file);
-    });
-  }
-
-  @bind
-  dragMove(e) {
-    if (!e.movementY && !e.movementX) {
-      return;
-    }
-
-    const editPane = document.querySelector(".query-editor");
-    const target = editPane.querySelector(".panels-flex");
-    const grippie = editPane.querySelector(".grippie");
-
-    // we need to get the initial height / width of edit pane
-    // before we manipulate the size
-    if (!this.initialPaneWidth && !this.originalPaneHeight) {
-      this.originalPaneWidth = target.clientWidth;
-      this.originalPaneHeight = target.clientHeight;
-    }
-
-    const newHeight = Math.max(
-      this.originalPaneHeight,
-      target.clientHeight + e.movementY
-    );
-    const newWidth = Math.max(
-      this.originalPaneWidth,
-      target.clientWidth + e.movementX
-    );
-
-    target.style.height = newHeight + "px";
-    target.style.width = newWidth + "px";
-    grippie.style.width = newWidth + "px";
-    this.appEvents.trigger("ace:resize");
+    this.router.transitionTo("adminPlugins.show.explorer.edit", record.id);
   }
 
   @bind
@@ -135,14 +105,56 @@ export default class PluginsExplorerController extends Controller {
   }
 
   @action
-  displayCreate() {
-    this.showCreate = true;
-    this.createFormData = { name: "" };
+  onTextFilterChange(event) {
+    this._currentFilter = event.target?.value || "";
+    this.#latestQueryRequest = null;
+    this.searchLoading = true;
+    discourseDebounce(this, this._fetchQueries, INPUT_DELAY);
   }
 
   @action
-  hideCreate() {
-    this.showCreate = false;
+  async loadTags(searchTerm) {
+    const term = (searchTerm || "").toLowerCase();
+    return this.queryTags
+      .filter((tag) => tag.toLowerCase().includes(term))
+      .map((tag) => ({ id: tag, name: tag }));
+  }
+
+  @action
+  onTagFilterChange(selection) {
+    this.tags = selection.map((tag) => tag.name).join(",");
+    this.searchLoading = true;
+    this._fetchQueries();
+  }
+
+  @action
+  addTagFilter(tagName, event) {
+    event?.preventDefault();
+
+    if (this.currentTags.includes(tagName)) {
+      return;
+    }
+
+    this.tags = [...this.currentTags, tagName].join(",");
+    this.searchLoading = true;
+    this._fetchQueries();
+  }
+
+  @action
+  tagFilterHref(tagName) {
+    return getURL(
+      applyQueryParams(this.router.urlFor("adminPlugins.show.explorer.index"), {
+        tags: tagName,
+      })
+    );
+  }
+
+  @action
+  onResetFilters() {
+    this._currentFilter = "";
+    this.tags = "";
+    this.searchLoading = true;
+    this._fetchQueries();
   }
 
   @action
@@ -153,25 +165,96 @@ export default class PluginsExplorerController extends Controller {
       this.sortByProperty = property;
       this.sortDescending = true;
     }
+    this.searchLoading = true;
+    this._fetchQueries();
   }
 
   @action
-  async create({ name }) {
-    try {
-      this.loading = true;
-      const result = await this.store
-        .createRecord("query", { name: name.trim() })
-        .save();
-      this.toasts.success({
-        data: { message: i18n("explorer.query_created") },
-      });
-      this.showCreate = false;
-      this.createFormData = { name: "" };
-      this.addCreatedRecord(result.target);
-    } catch (error) {
-      popupAjaxError(error);
-    } finally {
-      this.loading = false;
+  async loadMore() {
+    const loadedMore = await this.model?.loadMore();
+    if (loadedMore) {
+      this._setGroupNames(this.model.content);
     }
+  }
+
+  async _importQuery(file) {
+    const json = await this._readFileAsTextAsync(file);
+    const query = this._parseQuery(json);
+    const record = this.store.createRecord("query", query);
+    const response = await record.save();
+    return response.target;
+  }
+
+  _parseQuery(json) {
+    const parsed = JSON.parse(json);
+    const query = parsed.query;
+    if (!query || !query.sql) {
+      throw new TypeError();
+    }
+    query.id = 0; // 0 means no Id yet
+    return query;
+  }
+
+  _readFileAsTextAsync(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        resolve(reader.result);
+      };
+      reader.onerror = reject;
+
+      reader.readAsText(file);
+    });
+  }
+
+  async _fetchQueries() {
+    const model = this.model;
+    const request = (this.#latestQueryRequest = {});
+
+    try {
+      const result = await ajax(
+        "/admin/plugins/discourse-data-explorer/queries.json",
+        { data: this.fetchParams }
+      );
+
+      if (request !== this.#latestQueryRequest || model !== this.model) {
+        return;
+      }
+
+      const queries = result.queries.map((q) =>
+        this.store.createRecord("query", q)
+      );
+
+      model.content.splice(0, model.content.length, ...queries);
+      model.totalRows = result.total_rows_queries || queries.length;
+      model.loadMoreUrl = result.load_more_queries || null;
+      this.queryTags = result.extras?.tags ?? this.queryTags;
+
+      this._setGroupNames(queries);
+    } catch (e) {
+      if (request === this.#latestQueryRequest && model === this.model) {
+        popupAjaxError(e);
+      }
+    } finally {
+      if (request === this.#latestQueryRequest) {
+        this.searchLoading = false;
+      }
+    }
+  }
+
+  _setGroupNames(queries) {
+    if (!this.groups) {
+      return;
+    }
+    const groupNames = {};
+    this.groups.forEach((g) => {
+      groupNames[g.id] = g.name;
+    });
+    queries.forEach((query) => {
+      query.set(
+        "group_names",
+        (query.group_ids || []).map((id) => groupNames[id])
+      );
+    });
   }
 }

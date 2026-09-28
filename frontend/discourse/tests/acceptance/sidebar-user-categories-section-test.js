@@ -1,4 +1,4 @@
-import { click, currentURL, visit } from "@ember/test-helpers";
+import { click, currentURL, findAll, visit } from "@ember/test-helpers";
 import { test } from "qunit";
 import { TOP_SITE_CATEGORIES_TO_SHOW } from "discourse/components/sidebar/common/categories-section";
 import { NotificationLevels } from "discourse/lib/notification-levels";
@@ -9,10 +9,8 @@ import discoveryFixture from "discourse/tests/fixtures/discovery-fixtures";
 import {
   acceptance,
   publishToMessageBus,
-  queryAll,
   updateCurrentUser,
 } from "discourse/tests/helpers/qunit-helpers";
-import selectKit from "discourse/tests/helpers/select-kit-helper";
 import { i18n } from "discourse-i18n";
 
 acceptance(
@@ -152,15 +150,14 @@ acceptance("Sidebar - Logged on user - Categories Section", function (needs) {
       .dom(".sidebar-section[data-section-name='categories']")
       .exists("categories section is shown");
 
-    const categorySectionLinks = queryAll(
-      ".sidebar-section[data-section-name='categories'] .sidebar-section-link-wrapper[data-category-id]"
-    );
-
-    assert.strictEqual(
-      categorySectionLinks.length,
-      TOP_SITE_CATEGORIES_TO_SHOW,
-      "the right number of category section links are shown"
-    );
+    assert
+      .dom(
+        ".sidebar-section[data-section-name='categories'] .sidebar-section-link-wrapper[data-category-id]"
+      )
+      .exists(
+        { count: TOP_SITE_CATEGORIES_TO_SHOW },
+        "the right number of category section links are shown"
+      );
 
     const topCategories = Site.current().categoriesByCount.splice(
       0,
@@ -245,11 +242,11 @@ acceptance("Sidebar - Logged on user - Categories Section", function (needs) {
 
     await visit("/");
 
-    const categorySectionLinks = queryAll(
+    const categorySectionLinks = findAll(
       ".sidebar-section[data-section-name='categories'] .sidebar-section-link:not(.sidebar-section-link[data-link-name='all-categories'])"
     );
 
-    const categoryNames = [...categorySectionLinks].map((categorySectionLink) =>
+    const categoryNames = categorySectionLinks.map((categorySectionLink) =>
       categorySectionLink.textContent.trim()
     );
 
@@ -317,11 +314,11 @@ acceptance("Sidebar - Logged on user - Categories Section", function (needs) {
 
     await visit("/");
 
-    const categorySectionLinks = queryAll(
+    const categorySectionLinks = findAll(
       ".sidebar-section[data-section-name='categories'] .sidebar-section-link:not(.sidebar-section-link[data-link-name='all-categories'])"
     );
 
-    const categoryNames = [...categorySectionLinks].map((categorySectionLink) =>
+    const categoryNames = categorySectionLinks.map((categorySectionLink) =>
       categorySectionLink.textContent.trim()
     );
 
@@ -389,11 +386,11 @@ acceptance("Sidebar - Logged on user - Categories Section", function (needs) {
 
     await visit("/");
 
-    const categorySectionLinks = queryAll(
+    const categorySectionLinks = findAll(
       ".sidebar-section[data-section-name='categories'] .sidebar-section-link:not(.sidebar-section-link[data-link-name='all-categories'])"
     );
 
-    const categoryNames = [...categorySectionLinks].map((categorySectionLink) =>
+    const categoryNames = categorySectionLinks.map((categorySectionLink) =>
       categorySectionLink.textContent.trim()
     );
 
@@ -483,7 +480,7 @@ acceptance("Sidebar - Logged on user - Categories Section", function (needs) {
 
     assert
       .dom(
-        `.sidebar-section-link-wrapper[data-category-id="${category3.id}"] .sidebar-section-link-prefix .prefix-badge[class*="d-icon-category.restricted"]`
+        `.sidebar-section-link-wrapper[data-category-id="${category3.id}"] .sidebar-section-link-prefix .prefix-badge[class*="d-icon-lock"]`
       )
       .exists(
         "category3 section link is rendered with lock prefix badge icon as it is read restricted"
@@ -638,10 +635,8 @@ acceptance("Sidebar - Logged on user - Categories Section", function (needs) {
       );
   });
 
-  test("category section link has the right title", async function (assert) {
+  test("category section link does not have a title", async function (assert) {
     const categories = Site.current().categories;
-
-    // Category with link HTML tag in description
     const category = categories.find((c) => c.id === 28);
 
     updateCurrentUser({
@@ -652,10 +647,9 @@ acceptance("Sidebar - Logged on user - Categories Section", function (needs) {
 
     assert
       .dom(`.sidebar-section-link-wrapper[data-category-id="${category.id}"] a`)
-      .hasAttribute(
+      .doesNotHaveAttribute(
         "title",
-        category.descriptionText,
-        "category description without HTML entity is used as the link's title"
+        "does not expose the category description as a tooltip"
       );
   });
 
@@ -1028,20 +1022,19 @@ acceptance("Sidebar - Logged on user - Categories Section", function (needs) {
 
     await visit("/");
 
-    const headerDropdown = selectKit(
-      ".sidebar-section[data-section-name='categories'] .sidebar-section-header-dropdown"
-    );
+    const headerDropdown =
+      ".sidebar-section[data-section-name='categories'] .sidebar-section-header-dropdown";
 
-    assert.true(headerDropdown.exists());
+    assert.dom(headerDropdown).exists();
 
-    await headerDropdown.expand();
+    await click(headerDropdown);
 
-    assert.true(headerDropdown.rowByValue("new-category").exists());
-    assert.true(headerDropdown.rowByValue("edit-categories").exists());
+    assert.dom("[data-menu-option-id='new-category']").exists();
+    assert.dom("[data-menu-option-id='edit-categories']").exists();
 
-    await headerDropdown.selectRowByValue("new-category");
+    await click("[data-menu-option-id='new-category']");
 
-    assert.strictEqual(currentURL(), "/new-category");
+    assert.true(currentURL().startsWith("/new-category"));
   });
 
   test("categories section header shows single edit button for user who cannot create categories", async function (assert) {
@@ -1064,7 +1057,7 @@ acceptance(
       navigation_menu: "sidebar",
     });
 
-    needs.user({ new_new_view_enabled: true });
+    needs.user({ unified_new_enabled: true });
 
     test("count shown next to category link when sidebar_show_count_of_new_items is true", async function (assert) {
       const categories = Site.current().categories;
@@ -1364,6 +1357,64 @@ acceptance(
 );
 
 acceptance(
+  "Sidebar - Logged on user - Categories Section - Mobile slide-out",
+  function (needs) {
+    needs.user({
+      admin: true,
+      can_create_category: true,
+      sidebar_category_ids: [],
+    });
+    needs.mobileView();
+    needs.settings({ navigation_menu: "sidebar" });
+    needs.pretender((server, helper) => {
+      server.get("/categories/hierarchical_search", () => {
+        return helper.response({ categories: [] });
+      });
+    });
+
+    test("hamburger closes when header dropdown navigates to a new page", async function (assert) {
+      await visit("/");
+      await click("#toggle-hamburger-menu");
+
+      assert
+        .dom(".sidebar-hamburger-dropdown")
+        .exists("hamburger sidebar is open");
+
+      await click(
+        ".sidebar-section[data-section-name='categories'] .sidebar-section-header-dropdown"
+      );
+      await click("[data-menu-option-id='new-category']");
+
+      assert
+        .dom(".sidebar-hamburger-dropdown")
+        .doesNotExist("hamburger sidebar closes after header dropdown action");
+      assert.true(currentURL().startsWith("/new-category"));
+    });
+
+    test("hamburger closes when header dropdown opens a modal", async function (assert) {
+      await visit("/");
+      await click("#toggle-hamburger-menu");
+
+      assert
+        .dom(".sidebar-hamburger-dropdown")
+        .exists("hamburger sidebar is open");
+
+      await click(
+        ".sidebar-section[data-section-name='categories'] .sidebar-section-header-dropdown"
+      );
+      await click("[data-menu-option-id='edit-categories']");
+
+      assert
+        .dom(".sidebar-hamburger-dropdown")
+        .doesNotExist("hamburger sidebar closes after header dropdown action");
+      assert
+        .dom(".sidebar__edit-navigation-menu__categories-modal")
+        .exists("edit categories modal opens");
+    });
+  }
+);
+
+acceptance(
   "Sidebar - Admin - Categories Section - Header Dropdown Mode",
   function (needs) {
     needs.user({ admin: true, can_create_category: true });
@@ -1373,18 +1424,13 @@ acceptance(
       await visit("/");
       await click("#toggle-hamburger-menu");
 
-      const headerDropdown = selectKit(
+      await click(
         ".sidebar-section[data-section-name='categories'] .sidebar-section-header-dropdown"
       );
 
-      await headerDropdown.expand();
-
-      assert.true(
-        headerDropdown
-          .rowByValue("edit-categories")
-          .label()
-          .includes("Edit nav categories")
-      );
+      assert
+        .dom("[data-menu-option-id='edit-categories']")
+        .includesText("Edit nav categories");
     });
   }
 );

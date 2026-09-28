@@ -14,8 +14,9 @@ function getCSSColor(varName) {
 }
 
 export function isInCurrentPeriod(timestamp, grouping) {
-  const date = moment(timestamp);
-  const now = moment();
+  // Report data uses UTC dates, so compare in UTC
+  const date = moment.utc(timestamp);
+  const now = moment.utc();
 
   switch (grouping) {
     case "weekly":
@@ -54,11 +55,14 @@ export default class AdminReportChart extends Component {
     );
 
     const incompleteColor = getCSSColor("--primary-medium");
-    let pointColors = model.primary_color;
+    const tertiaryRgb = getCSSColor("--tertiary-rgb");
+    const primaryColor = `rgb(${tertiaryRgb})`;
+    const secondaryColor = `rgba(${tertiaryRgb}, 0.1)`;
+    let pointColors = primaryColor;
     let segment;
 
     if (isLastPointInCurrentPeriod) {
-      pointColors = Array(chartData.length).fill(model.primary_color);
+      pointColors = Array(chartData.length).fill(primaryColor);
       pointColors[lastDataPointIndex] = incompleteColor;
 
       const isIncompleteSegment = (ctx) =>
@@ -66,7 +70,7 @@ export default class AdminReportChart extends Component {
       segment = {
         borderDash: (ctx) => (isIncompleteSegment(ctx) ? DOTTED_LINE : []),
         borderColor: (ctx) =>
-          isIncompleteSegment(ctx) ? incompleteColor : model.primary_color,
+          isIncompleteSegment(ctx) ? incompleteColor : primaryColor,
       };
     }
 
@@ -77,8 +81,8 @@ export default class AdminReportChart extends Component {
           data: chartData.map((d) => Math.round(parseFloat(d.y))),
           backgroundColor: prevChartData.length
             ? "transparent"
-            : model.secondary_color,
-          borderColor: model.primary_color,
+            : secondaryColor,
+          borderColor: primaryColor,
           pointRadius: 3,
           borderWidth: 2,
           pointBackgroundColor: pointColors,
@@ -96,7 +100,7 @@ export default class AdminReportChart extends Component {
     if (prevChartData.length) {
       data.datasets.push({
         data: prevChartData.map((d) => Math.round(parseFloat(d.y))),
-        borderColor: model.primary_color,
+        borderColor: primaryColor,
         borderDash: DOTTED_LINE,
         backgroundColor: "transparent",
         borderWidth: 1,
@@ -112,6 +116,9 @@ export default class AdminReportChart extends Component {
         plugins: {
           tooltip: {
             backgroundColor: getCSSColor("--primary"),
+            titleColor: getCSSColor("--secondary"),
+            bodyColor: getCSSColor("--secondary"),
+            footerColor: getCSSColor("--secondary"),
             titleMarginBottom: 16,
             footerMarginTop: 16,
             padding: {
@@ -161,10 +168,16 @@ export default class AdminReportChart extends Component {
         scales: {
           y: {
             display: true,
+            title: {
+              display: true,
+              text: model.y_axis_title,
+            },
+
             grid: { color: getCSSColor("--primary-low") },
             ticks: {
               callback: (label) => number(label),
               sampleSize: 5,
+              maxRotation: 25,
               minRotation: 0,
               precision: 0,
             },
@@ -188,6 +201,6 @@ export default class AdminReportChart extends Component {
   }
 
   <template>
-    <Chart @chartConfig={{this.chartConfig}} class="admin-report-chart" />
+    <Chart class="admin-report-chart" @chartConfig={{this.chartConfig}} />
   </template>
 }

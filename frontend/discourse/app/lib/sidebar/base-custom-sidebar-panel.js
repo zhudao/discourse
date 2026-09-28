@@ -50,6 +50,15 @@ export default class BaseCustomSidebarPanel {
     return false;
   }
 
+  /**
+   * Overrides the header's back link, for a panel that can be reached from
+   * somewhere other than the forum.
+   *
+   * @returns {{href: string, label: string}|undefined} An href and an i18n key,
+   * or undefined to leave the default "back to forum" link alone.
+   */
+  get backLink() {}
+
   get expandActiveSection() {
     return false;
   }
@@ -63,14 +72,13 @@ export default class BaseCustomSidebarPanel {
   }
 
   /**
-   * @param {string} filter filter applied
+   * How many links the panel must hold before its filter earns its place. A
+   * short panel is quicker to read than to filter.
    *
-   * @returns {string | SafeString} Description displayed when the applied filter has no results.
-   * Use `htmlSafe` from `from "@ember/template` to use HTML strings.
+   * @returns {number} Defaults to 0, showing the filter whenever `filterable`.
    */
-  // eslint-disable-next-line no-unused-vars
-  filterNoResultsDescription(filter) {
-    return null;
+  get filterableMinLinks() {
+    return 0;
   }
 
   /**
@@ -81,15 +89,26 @@ export default class BaseCustomSidebarPanel {
     return false;
   }
 
+  get scrollActiveLinkIntoView() {
+    return false;
+  }
+
+  /**
+   * @param {string} filter filter applied
+   *
+   * @returns {string | SafeString} Description displayed when the applied filter has no results.
+   * Use `trustHTML` from `@ember/template` to use HTML strings.
+   */
+  // eslint-disable-next-line no-unused-vars
+  filterNoResultsDescription(filter) {
+    return null;
+  }
+
   /**
    * @returns {Function} Action when search input is clicked.
    */
   onSearchClick() {
     return null;
-  }
-
-  get scrollActiveLinkIntoView() {
-    return false;
   }
 
   #notImplemented() {

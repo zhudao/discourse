@@ -21,6 +21,24 @@ describe TagSettingsUpdater do
       expect(tag.reload.slug).to eq("custom-slug")
     end
 
+    it "regenerates the slug from the name when it is cleared" do
+      tag.update!(slug: "custom-slug")
+
+      result = TagSettingsUpdater.update(tag, admin, { slug: "" })
+
+      expect(result).to eq(true)
+      expect(tag.reload.slug).to eq(tag.name)
+    end
+
+    it "keeps the slug when it isn't provided" do
+      tag.update!(slug: "custom-slug")
+
+      result = TagSettingsUpdater.update(tag, admin, { description: "a description" })
+
+      expect(result).to eq(true)
+      expect(tag.reload.slug).to eq("custom-slug")
+    end
+
     it "cleans tag name using DiscourseTagging" do
       result = TagSettingsUpdater.update(tag, admin, { name: "  New Name  " })
 
@@ -121,12 +139,12 @@ describe TagSettingsUpdater do
 
         loc = TagLocalization.find_by(tag_id: tag.id, locale: "de")
         expect(loc).to be_present
-        expect(loc.name).to eq("German Name")
+        expect(loc.name).to eq("german-name")
         expect(loc.description).to eq("German Desc")
       end
 
       it "updates existing localizations" do
-        TagLocalization.create!(tag_id: tag.id, locale: "fr", name: "Old", description: "Old Desc")
+        TagLocalization.create!(tag_id: tag.id, locale: "fr", name: "old", description: "Old Desc")
 
         TagSettingsUpdater.update(
           tag,
@@ -135,22 +153,26 @@ describe TagSettingsUpdater do
         )
 
         loc = TagLocalization.find_by(tag_id: tag.id, locale: "fr")
-        expect(loc.name).to eq("New")
+        expect(loc.name).to eq("new")
         expect(loc.description).to eq("New Desc")
       end
 
       it "removes localizations not in the submitted list" do
-        TagLocalization.create!(tag_id: tag.id, locale: "es", name: "Spanish", description: "")
-        TagLocalization.create!(tag_id: tag.id, locale: "it", name: "Italian", description: "")
+        TagLocalization.create!(tag_id: tag.id, locale: "es", name: "spanish", description: "")
+        TagLocalization.create!(tag_id: tag.id, locale: "it", name: "italian", description: "")
 
         TagSettingsUpdater.update(
           tag,
           admin,
-          { localizations: [{ locale: "es", name: "Spanish Updated", description: "" }] },
+          { localizations: [{ locale: "es", name: "spanish-updated", description: "" }] },
         )
 
         expect(TagLocalization.find_by(tag_id: tag.id, locale: "es")).to be_present
         expect(TagLocalization.find_by(tag_id: tag.id, locale: "it")).to be_nil
+
+        TagSettingsUpdater.update(tag, admin, { localizations: [] })
+
+        expect(TagLocalization.where(tag_id: tag.id)).to be_empty
       end
     end
   end

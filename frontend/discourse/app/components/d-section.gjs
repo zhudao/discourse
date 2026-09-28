@@ -12,7 +12,6 @@ export default class DSection extends Component {
       `<DSection> is deprecated. Use {{body-class "foo-page" "bar"}} and/or <section></section> instead.`,
       {
         since: "3.2.0.beta1",
-        dropFrom: "3.3.0.beta1",
         id: "discourse.d-section",
       }
     );
@@ -28,7 +27,7 @@ export default class DSection extends Component {
     {{/if}}
 
     {{#if (notEq @tagName "")}}
-      <section id={{@id}} class={{@class}} ...attributes>{{yield}}</section>
+      <section class={{@class}} id={{@id}} ...attributes>{{yield}}</section>
     {{else}}
       {{yield}}
     {{/if}}

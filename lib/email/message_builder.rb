@@ -20,6 +20,10 @@ module Email
         hostname: Discourse.current_hostname,
       }.merge!(@opts)
 
+      if @opts[:recipient_user].present?
+        @template_args[:recipient_username] = @opts[:recipient_user].username
+      end
+
       if @opts[:template].present? && I18n.exists?("#{@opts[:template]}.preview")
         @template_args[:email_preview] ||= I18n.t("#{@opts[:template]}.preview", @template_args)
       end
@@ -135,7 +139,13 @@ module Email
         subject = @opts[:add_re_to_subject] ? I18n.t("subject_re") : ""
         subject = "#{subject}#{@template_args[:topic_title]}"
       elsif @opts[:template]
-        subject = I18n.t("#{@opts[:template]}.subject_template", @template_args)
+        subject_key = "#{@opts[:template]}.subject_template"
+
+        if SiteSetting.simple_email_subject && I18n.exists?("#{subject_key}_improved")
+          subject_key += "_improved"
+        end
+
+        subject = I18n.t(subject_key, @template_args)
       else
         subject = @opts[:subject]
       end
@@ -206,7 +216,7 @@ module Email
             optional_re: "",
             optional_pm: "",
             optional_cat: format_category,
-            optional_tags: format_tags,
+            optional_tags: ->(_) { format_tag_hashtags },
           )
 
         body = I18n.t("#{@opts[:template]}.text_body_template", augmented_template_args).dup
@@ -393,6 +403,15 @@ module Email
       else
         ""
       end
+    end
+
+    def format_tag_hashtags
+      return "" if @opts[:tag_names].blank?
+      return format_tags if HashtagAutocompleteService.data_source_types.exclude?("tag")
+
+      guardian = @opts[:recipient_user]&.guardian || Guardian.new
+      hashtags = HashtagAutocompleteService.new(guardian).hashtags_for("tag", @opts[:tag_names])
+      "#{hashtags.join(" ")} "
     end
   end
 end

@@ -29,17 +29,23 @@ class ApiKeyScope < ActiveRecord::Base
           },
           update: {
             actions: %w[topics#update topics#status],
-            params: %i[topic_id category_id],
+            params: %i[category_id],
+            path_params: %i[topic_id],
           },
           delete: {
             actions: %w[topics#destroy],
+            path_params: %i[topic_id],
+            aliases: {
+              topic_id: :id,
+            },
           },
           recover: {
             actions: %w[topics#recover],
+            path_params: %i[topic_id],
           },
           read: {
             actions: %w[topics#show topics#feed topics#posts topics#show_by_external_id],
-            params: %i[topic_id external_id],
+            path_params: %i[topic_id external_id],
             aliases: {
               topic_id: :id,
             },
@@ -53,23 +59,26 @@ class ApiKeyScope < ActiveRecord::Base
           },
           status: {
             actions: %w[topics#status],
-            params: %i[topic_id category_id status enabled],
+            params: %i[category_id status enabled],
+            path_params: %i[topic_id],
           },
           change_owner: {
             actions: %w[topics#change_post_owners],
-            params: %i[topic_id],
+            path_params: %i[topic_id],
           },
         },
         posts: {
           edit: {
             actions: %w[posts#update],
-            params: %i[id],
+            path_params: %i[id],
           },
           delete: {
             actions: %w[posts#destroy],
+            path_params: %i[id],
           },
           recover: {
             actions: %w[posts#recover],
+            path_params: %i[post_id],
           },
           list: {
             actions: %w[posts#latest],
@@ -78,15 +87,15 @@ class ApiKeyScope < ActiveRecord::Base
         revisions: {
           read: {
             actions: %w[posts#latest_revision posts#revisions],
-            params: %i[post_id],
+            path_params: %i[post_id],
           },
           modify: {
             actions: %w[posts#hide_revision posts#show_revision posts#revert],
-            params: %i[post_id],
+            path_params: %i[post_id],
           },
           permanently_delete: {
             actions: %w[posts#permanently_delete_revisions],
-            params: %i[post_id],
+            path_params: %i[post_id],
           },
         },
         tags: {
@@ -100,14 +109,14 @@ class ApiKeyScope < ActiveRecord::Base
           },
           show: {
             actions: %w[tag_groups#show],
-            params: %i[id],
+            path_params: %i[id],
           },
           create: {
             actions: %w[tag_groups#create],
           },
           update: {
             actions: %w[tag_groups#update],
-            params: %i[id],
+            path_params: %i[id],
           },
         },
         categories: {
@@ -116,7 +125,7 @@ class ApiKeyScope < ActiveRecord::Base
           },
           show: {
             actions: %w[categories#show],
-            params: %i[id],
+            path_params: %i[id],
           },
         },
         uploads: {
@@ -135,7 +144,7 @@ class ApiKeyScope < ActiveRecord::Base
         users: {
           bookmarks: {
             actions: %w[users#bookmarks],
-            params: %i[username],
+            path_params: %i[username],
           },
           sync_sso: {
             actions: %w[admin/users#sync_sso],
@@ -143,11 +152,11 @@ class ApiKeyScope < ActiveRecord::Base
           },
           show: {
             actions: %w[users#show],
-            params: %i[username external_id external_provider],
+            path_params: %i[username external_id external_provider],
           },
           check_emails: {
             actions: %w[users#check_emails],
-            params: %i[username],
+            path_params: %i[username],
           },
           create: {
             actions: %w[users#create],
@@ -161,19 +170,23 @@ class ApiKeyScope < ActiveRecord::Base
               users#feature_topic
               users#clear_featured_topic
             ],
-            params: %i[username],
+            path_params: %i[username],
           },
           log_out: {
             actions: %w[admin/users#log_out],
+            path_params: %i[user_id],
           },
           anonymize: {
             actions: %w[admin/users#anonymize],
+            path_params: %i[user_id],
           },
           suspend: {
             actions: %w[admin/users#suspend],
+            path_params: %i[user_id],
           },
           delete: {
             actions: %w[admin/users#destroy],
+            path_params: %i[id],
           },
           list: {
             actions: %w[admin/users#index],
@@ -198,21 +211,27 @@ class ApiKeyScope < ActiveRecord::Base
           },
         },
         badges: {
+          list: {
+            actions: %w[badges#index admin/badges#index],
+          },
           create: {
             actions: %w[admin/badges#create],
           },
           show: {
             actions: %w[badges#show],
+            path_params: %i[id],
           },
           update: {
             actions: %w[admin/badges#update],
+            path_params: %i[id],
           },
           delete: {
             actions: %w[admin/badges#destroy],
+            path_params: %i[id],
           },
           list_user_badges: {
             actions: %w[user_badges#username],
-            params: %i[username],
+            path_params: %i[username],
           },
           assign_badge_to_user: {
             actions: %w[user_badges#create],
@@ -220,12 +239,13 @@ class ApiKeyScope < ActiveRecord::Base
           },
           revoke_badge_from_user: {
             actions: %w[user_badges#destroy],
+            path_params: %i[id],
           },
         },
         groups: {
           manage_groups: {
             actions: %w[groups#members groups#add_members groups#remove_member],
-            params: %i[id],
+            path_params: %i[id name],
           },
           administer_groups: {
             actions: %w[
@@ -235,6 +255,7 @@ class ApiKeyScope < ActiveRecord::Base
               groups#update
               groups#index
             ],
+            path_params: %i[id name],
           },
         },
         search: {
@@ -270,6 +291,12 @@ class ApiKeyScope < ActiveRecord::Base
 
       parse_resources!(mappings)
       @default_mappings = mappings
+    end
+
+    def restrictable_parameters(mapping)
+      (
+        Array(mapping&.dig(:params)).map(&:to_sym) | Array(mapping&.dig(:path_params)).map(&:to_sym)
+      ).presence
     end
 
     def scope_mappings
@@ -314,10 +341,8 @@ class ApiKeyScope < ActiveRecord::Base
             action = "#{defaults[:controller]}##{defaults[:action]}"
             path = route.path.spec.to_s.gsub(/\(\.:format\)/, "")
             api_supported_path =
-              (
-                path.end_with?(".rss") || !route.path.requirements[:format] ||
-                  route.path.requirements[:format].match?("json")
-              )
+              path.end_with?(".rss") || !route.path.requirements[:format] ||
+                route.path.requirements[:format].match?("json")
             excluded_paths = %w[/new-topic /new-message /exception]
 
             if actions.include?(action) && api_supported_path && !excluded_paths.include?(path)
@@ -339,6 +364,8 @@ class ApiKeyScope < ActiveRecord::Base
   end
 
   def permits?(env)
+    return false if mapping.nil?
+
     RouteMatcher.new(**mapping.except(:urls), allowed_param_values: allowed_parameters).match?(
       env: env,
     )
@@ -356,12 +383,12 @@ end
 # Table name: api_key_scopes
 #
 #  id                 :bigint           not null, primary key
-#  api_key_id         :integer          not null
-#  resource           :string           not null
 #  action             :string           not null
 #  allowed_parameters :json
+#  resource           :string           not null
 #  created_at         :datetime         not null
 #  updated_at         :datetime         not null
+#  api_key_id         :integer          not null
 #
 # Indexes
 #

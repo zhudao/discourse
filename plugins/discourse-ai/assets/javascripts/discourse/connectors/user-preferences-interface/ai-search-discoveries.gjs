@@ -7,18 +7,18 @@ export default class AiSearchDiscoveries extends Component {
     return (
       siteSettings.discourse_ai_enabled &&
       siteSettings.ai_discover_enabled &&
-      siteSettings.ai_discover_persona &&
-      currentUser?.can_use_ai_discover_persona
+      siteSettings.ai_discover_agent &&
+      currentUser?.can_use_ai_discover_agent
     );
   }
 
   <template>
     <fieldset class="control-group ai-preferences">
       <PreferenceCheckbox
-        @labelKey="discourse_ai.discobot_discoveries.user_setting"
-        @checked={{@outletArgs.model.user_option.ai_search_discoveries}}
-        data-setting-name="ai-search-discoveries"
         class="pref-ai-search-discoveries"
+        data-setting-name="ai-search-discoveries"
+        @checked={{@outletArgs.model.user_option.ai_search_discoveries}}
+        @labelKey="discourse_ai.discobot_discoveries.user_setting"
       />
     </fieldset>
   </template>

@@ -1,17 +1,17 @@
 import { tracked } from "@glimmer/tracking";
 import Controller from "@ember/controller";
 import { action, computed } from "@ember/object";
-import { and, notEmpty } from "@ember/object/computed";
 import { service } from "@ember/service";
-import { htmlSafe } from "@ember/template";
+import { trustHTML } from "@ember/template";
+import { isEmpty } from "@ember/utils";
+import AdminUserUpcomingChanges from "discourse/admin/components/admin-user-upcoming-changes";
 import AdminUser from "discourse/admin/models/admin-user";
 import { ajax } from "discourse/lib/ajax";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import CanCheckEmailsHelper from "discourse/lib/can-check-emails-helper";
-import { fmt, propertyNotEqual, setting } from "discourse/lib/computed";
-import discourseComputed from "discourse/lib/decorators";
 import getURL from "discourse/lib/get-url";
-import DiscourseURL, { userPath } from "discourse/lib/url";
+import { deepEqual } from "discourse/lib/object";
+import DiscourseURL, { groupPath, userPath } from "discourse/lib/url";
 import { i18n } from "discourse-i18n";
 import DeletePostsConfirmationModal from "../../components/modal/delete-posts-confirmation";
 import MergeUsersConfirmationModal from "../../components/modal/merge-users-confirmation";
@@ -33,17 +33,40 @@ export default class AdminUserIndexController extends Controller {
   ssoLastPayload = null;
   isLoading = false;
 
-  @setting("enable_badges") showBadges;
-  @setting("moderators_view_emails") canModeratorsViewEmails;
-  @notEmpty("model.manual_locked_trust_level") hasLockedTrustLevel;
+  @computed("siteSettings.enable_badges")
+  get showBadges() {
+    return this.siteSettings.enable_badges;
+  }
 
-  @propertyNotEqual("originalPrimaryGroupId", "model.primary_group_id")
-  primaryGroupDirty;
+  @computed("siteSettings.moderators_view_emails")
+  get canModeratorsViewEmails() {
+    return this.siteSettings.moderators_view_emails;
+  }
 
-  @and("model.second_factor_enabled", "model.can_disable_second_factor")
-  canDisableSecondFactor;
+  @computed("model.manual_locked_trust_level")
+  get hasLockedTrustLevel() {
+    return !isEmpty(this.model?.manual_locked_trust_level);
+  }
 
-  @fmt("model.username_lower", userPath("%@/preferences")) preferencesPath;
+  @computed("originalPrimaryGroupId", "model.primary_group_id")
+  get primaryGroupDirty() {
+    return !deepEqual(
+      this.originalPrimaryGroupId,
+      this.model?.primary_group_id
+    );
+  }
+
+  @computed("model.second_factor_enabled", "model.can_disable_second_factor")
+  get canDisableSecondFactor() {
+    return (
+      this.model?.second_factor_enabled && this.model?.can_disable_second_factor
+    );
+  }
+
+  @computed("model.username_lower")
+  get preferencesPath() {
+    return userPath(`${this.model?.username_lower}/preferences`);
+  }
 
   get customGroupIds() {
     return this.model.customGroups.map((group) => group.id);
@@ -65,8 +88,8 @@ export default class AdminUserIndexController extends Controller {
   get automaticGroups() {
     return this.model.automaticGroups
       .map((group) => {
-        const name = htmlSafe(group.name);
-        return `<a href="/g/${name}">${name}</a>`;
+        const name = trustHTML(group.name);
+        return `<a href="${groupPath(name)}">${name}</a>`;
       })
       .join(", ");
   }
@@ -81,22 +104,20 @@ export default class AdminUserIndexController extends Controller {
       ?.join(", ");
   }
 
-  @discourseComputed("model.user_fields.[]")
-  userFields(userFields) {
-    return this.site.collectUserFields(userFields);
+  @computed("model.user_fields.[]")
+  get userFields() {
+    return this.site.collectUserFields(this.model?.user_fields);
   }
 
-  @discourseComputed(
-    "model.can_delete_all_posts",
-    "model.admin",
-    "model.post_count"
-  )
-  deleteAllPostsExplanation(canDeleteAllPosts, admin, postCount) {
-    if (canDeleteAllPosts) {
+  @computed("model.can_delete_all_posts", "model.admin", "model.post_count")
+  get deleteAllPostsExplanation() {
+    if (this.model?.can_delete_all_posts) {
       return null;
-    } else if (admin) {
+    } else if (this.model?.admin) {
       return i18n("admin.user.delete_posts_forbidden_because_admin");
-    } else if (postCount > this.siteSettings.delete_all_posts_max) {
+    } else if (
+      this.model?.post_count > this.siteSettings.delete_all_posts_max
+    ) {
       return i18n("admin.user.cant_delete_all_too_many_posts", {
         count: this.siteSettings.delete_all_posts_max,
       });
@@ -107,11 +128,11 @@ export default class AdminUserIndexController extends Controller {
     }
   }
 
-  @discourseComputed("model.canBeDeleted", "model.admin")
-  deleteExplanation(canBeDeleted, admin) {
-    if (canBeDeleted) {
+  @computed("model.canBeDeleted", "model.admin")
+  get deleteExplanation() {
+    if (this.model?.canBeDeleted) {
       return null;
-    } else if (admin) {
+    } else if (this.model?.admin) {
       return i18n("admin.user.delete_forbidden_because_admin");
     } else {
       return i18n("admin.user.delete_forbidden", {
@@ -120,9 +141,9 @@ export default class AdminUserIndexController extends Controller {
     }
   }
 
-  @discourseComputed("model.username")
-  postEditsByEditorFilter(username) {
-    return { editor: username };
+  @computed("model.username")
+  get postEditsByEditorFilter() {
+    return { editor: this.model?.username };
   }
 
   @computed("model.id", "currentUser.id")
@@ -143,6 +164,15 @@ export default class AdminUserIndexController extends Controller {
     ).canAdminCheckEmails;
   }
 
+  @computed("ssoLastPayload")
+  get ssoPayload() {
+    return this.ssoLastPayload.split("&");
+  }
+
+  get deleteUserOptions() {
+    return this.adminTools.deleteUserOptions;
+  }
+
   groupAdded(added) {
     return this.model
       .groupAdded(added)
@@ -160,9 +190,13 @@ export default class AdminUserIndexController extends Controller {
       .catch(() => this.dialog.alert(i18n("generic_error")));
   }
 
-  @discourseComputed("ssoLastPayload")
-  ssoPayload(lastPayload) {
-    return lastPayload.split("&");
+  @action
+  openUserUpcomingChanges() {
+    this.modal.show(AdminUserUpcomingChanges, {
+      model: {
+        user: this.model,
+      },
+    });
   }
 
   @action
@@ -202,11 +236,6 @@ export default class AdminUserIndexController extends Controller {
   @action
   approve() {
     return this.model.approve(this.currentUser);
-  }
-
-  @action
-  _formatError(event) {
-    return `http: ${event.status} - ${event.body}`;
   }
 
   @action
@@ -413,64 +442,20 @@ export default class AdminUserIndexController extends Controller {
   }
 
   @action
-  destroyUser() {
-    const postCount = this.get("model.post_count");
+  destroyUser(optionId) {
+    const postCount = this.model.post_count;
     const maxPostCount = this.siteSettings.delete_all_posts_max;
     const location = document.location.pathname;
 
-    const performDestroy = (block) => {
-      this.dialog.notice(i18n("admin.user.deleting_user"));
-      let formData = { context: location };
-      if (block) {
-        formData["block_email"] = true;
-        formData["block_urls"] = true;
-        formData["block_ip"] = true;
-      }
-      if (postCount <= maxPostCount) {
-        formData["delete_posts"] = true;
-      }
-      this.model
-        .destroy(formData)
-        .then((data) => {
-          if (data.deleted) {
-            if (/^\/admin\/users\/list\//.test(location)) {
-              document.location = location;
-            } else {
-              document.location = getURL("/admin/users/list/active");
-            }
-          } else {
-            this.dialog.alert(i18n("admin.user.delete_failed"));
-          }
-        })
-        .catch(() => {
-          this.dialog.alert(i18n("admin.user.delete_failed"));
-        });
-    };
-
-    this.dialog.alert({
-      title: i18n("admin.user.delete_confirm_title"),
-      message: i18n("admin.user.delete_confirm"),
-      class: "delete-user-modal",
-      buttons: [
-        {
-          label: i18n("admin.user.delete_dont_block"),
-          class: "btn-danger delete-dont-block",
-          action: () => {
-            return performDestroy(false);
-          },
-        },
-        {
-          icon: "triangle-exclamation",
-          label: i18n("admin.user.delete_and_block"),
-          class: "btn-danger delete-and-block",
-          action: () => {
-            return performDestroy(true);
-          },
-        },
-        {
-          label: i18n("composer.cancel"),
-        },
-      ],
+    this.adminTools.showDeleteUserModal(this.model.id, optionId, {
+      deletePosts: postCount <= maxPostCount,
+      onDeleted: () => {
+        if (/^\/admin\/users\/list\//.test(location)) {
+          document.location = location;
+        } else {
+          document.location = getURL("/admin/users/list/active");
+        }
+      },
     });
   }
 
@@ -670,5 +655,10 @@ export default class AdminUserIndexController extends Controller {
         deleteAllPosts: () => this.adminTools.deletePostsDecider(this.model),
       },
     });
+  }
+
+  @action
+  _formatError(event) {
+    return `http: ${event.status} - ${event.body}`;
   }
 }

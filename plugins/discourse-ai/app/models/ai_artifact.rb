@@ -97,8 +97,23 @@ class AiArtifact < ActiveRecord::Base
     version
   end
 
+  def available_to?(guardian)
+    if !SiteSetting.discourse_ai_enabled ||
+         !SiteSetting.ai_artifact_security.in?(%w[lax hybrid strict])
+      return false
+    end
+
+    source_post = Post.find_by(id: post_id)
+    return false if source_post.blank? || source_post.topic.blank?
+
+    shared_conversation = SharedAiConversation.find_by(target: source_post.topic) if public?
+    return true if public? && (shared_conversation.blank? || shared_conversation.publicly_visible?)
+
+    guardian.can_see?(source_post)
+  end
+
   def public?
-    !!metadata&.dig("public")
+    metadata&.dig("public") == true
   end
 end
 
@@ -107,13 +122,13 @@ end
 # Table name: ai_artifacts
 #
 #  id         :bigint           not null, primary key
-#  user_id    :integer          not null
-#  post_id    :integer          not null
-#  name       :string(255)      not null
-#  html       :string(65535)
 #  css        :string(65535)
+#  html       :string(65535)
 #  js         :string(65535)
 #  metadata   :jsonb
+#  name       :string(255)      not null
 #  created_at :datetime         not null
 #  updated_at :datetime         not null
+#  post_id    :integer          not null
+#  user_id    :integer          not null
 #

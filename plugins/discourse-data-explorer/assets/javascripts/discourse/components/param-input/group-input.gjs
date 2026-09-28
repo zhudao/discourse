@@ -18,16 +18,16 @@ export default class GroupInput extends Component {
   }
 
   <template>
-    <@field.Custom id={{@field.id}}>
+    <@Control id={{@field.id}}>
       <GroupChooser
+        name={{@info.identifier}}
         @content={{this.allGroups}}
-        @value={{@field.value}}
         @labelProperty="name"
-        @valueProperty="name"
         @onChange={{@field.set}}
         @options={{this.groupChooserOption}}
-        name={{@info.identifier}}
+        @value={{@field.value}}
+        @valueProperty="name"
       />
-    </@field.Custom>
+    </@Control>
   </template>
 }

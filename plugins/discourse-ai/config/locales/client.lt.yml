@@ -10,17 +10,24 @@ lt:
       api:
         scopes:
           descriptions:
-            discourse_ai:
+            ai:
               search: "Leidžia dirbtinio intelekto paiešką"
-              stream_completion: "Leidžia transliuoti dirbtinio intelekto personažų užbaigimus"
-              update_personas: "Leidžia atnaujinti dirbtinio intelekto personas"
       site_settings:
         categories:
           discourse_ai: "Discourse AI"
       dashboard:
+        sections:
+          ask_ai:
+            title: "Paklauskite AI"
+        ask_ai:
+          title: "Paklauskite AI"
+          reports:
+            retry_questions: "Bandykite dar kartą"
+          date: "Data"
+          outcomes:
+            failed: "Nepavyko"
         emotion:
           title: "Emocija"
-          description: "Lentelėje pateikiamas įrašų, priskirtų konkrečiai emocijai, skaičius. Klasifikuota pagal modelį „SamLowe/roberta-base-go_emotions“."
         reports:
           filters:
             group_by:
@@ -35,9 +42,6 @@ lt:
             create_ai_llm_model: "Sukurkite LLM modelį"
             update_ai_llm_model: "Atnaujinti LLM modelį"
             delete_ai_llm_model: "Ištrinti LLM modelį"
-            create_ai_persona: "Sukurkite AI personažą"
-            update_ai_persona: "Atnaujinti dirbtinio intelekto personažą"
-            delete_ai_persona: "Ištrinti dirbtinio intelekto personažą"
             create_ai_tool: "Sukurkite dirbtinio intelekto įrankį"
             update_ai_tool: "Atnaujinti dirbtinio intelekto įrankį"
             delete_ai_tool: "Ištrinti dirbtinio intelekto įrankį"
@@ -110,8 +114,6 @@ lt:
             top_p:
               label: "Viršutinė P"
               description: "Viršutinė P, naudojama LLM, padidinkite, kad padidėtų atsitiktinumas (palikite tuščią, jei norite naudoti numatytuosius modelio parametrus)"
-            persona_id:
-              label: "Persona"
         ai_tool_action:
           fields:
             tool:
@@ -120,14 +122,8 @@ lt:
             llm_model:
               label: "LLM modelis"
               description: "Kalbos modelis įrankiams, kurie naudoja llm.generate() (neprivaloma)"
-        llm_persona_triage:
-          fields:
-            persona:
-              label: "Persona"
         llm_triage:
           fields:
-            triage_persona:
-              label: "Persona"
             search_for_text:
               label: "Ieškokite teksto"
             category:
@@ -145,10 +141,23 @@ lt:
               label: "Slėpti temą"
     discourse_ai:
       title: "AI"
+      copied: "Nukopijuota"
+      ai_decoded_transcript:
+        tool: "Įrankis"
+        type: "Tipas"
+        error: "Klaida"
+        response: "Atsakymas"
+      ai_tool_approval:
+        loading: "Kraunasi..."
+        tool: "Veiksmai"
+        user: "Narys"
+        approve: "Patvirtinti"
+        reject: "Atmesti"
+        approved: "Patvirtinta"
+        rejected: "Atmesta"
       llm_selector:
         none: "Nieko"
       features:
-        back: "Atgal"
         settings_save_error: "Kai kurių nustatymų išsaugoti nepavyko."
         disabled: "(uždrausta)"
         groups: "Grupės:"
@@ -166,6 +175,8 @@ lt:
             access_control: "Prieigos kontrolė"
             ui_settings: "Vartotojo sąsajos nustatymai"
             integrations: "Integracijos"
+        nav:
+          enabled: "Galimas"
         filters:
           all: "Visi"
           reset: "Atstatyti"
@@ -176,13 +187,18 @@ lt:
             backfill: "Užpildymas"
         search:
           name: "Paieška"
+          ask_ai: "Paklauskite AI"
           setting_groups:
             settings: "Pagrindiniai nustatymai"
+            access_control: "Prieigos kontrolė"
         embeddings:
           setting_groups:
             model_settings: "Modelio nustatymai"
             related_topics: "Susijusios temos"
             semantic_search: "Semantinė paieška"
+        admin_dashboard:
+          setting_groups:
+            settings: "Pagrindiniai nustatymai"
         discord:
           setting_groups:
             settings: "Pagrindiniai nustatymai"
@@ -194,9 +210,7 @@ lt:
             settings: "Pagrindiniai nustatymai"
             topic_criteria: "Temos kriterijai"
             post_criteria: "Įrašo kriterijai"
-            personas: "Personos"
         ai_helper:
-          name: "Padėjėjas"
           description: "Padeda vartotojams bendrauti bendruomenėje, pavyzdžiui, kurti temas, rašyti įrašus ir skaityti turinį"
           proofread: Korektūruotas tekstas
           title_suggestions: "Siūlyti pavadinimus"
@@ -206,12 +220,13 @@ lt:
           translate: "Versti"
           markdown_tables: "Sukurti Markdown lentelę"
           custom_prompt: "Pasirinktinis raginimas"
-          image_caption: "Antraštės vaizdai"
           setting_groups:
             access_permissions: "Prieiga ir leidimai"
             enabled_features: "Įjungtos funkcijos"
             automation: "Automatizavimas"
-            personas: "Personos"
+        image_caption:
+          setting_groups:
+            settings: "Nustatymai"
         translation:
           name: "Vertimai"
           description: "Verčia turinį į palaikomas kalbas"
@@ -221,7 +236,6 @@ lt:
           short_text_translator: "Trumpų tekstų vertėjas"
           setting_groups:
             settings: "Pagrindiniai nustatymai"
-            personas: "Personos"
             backfill_and_limits: "Užpildymas ir apribojimai"
         spam:
           name: "Šlamštas"
@@ -234,6 +248,22 @@ lt:
         card: "Kortelė"
       translations:
         title: "Vertimai"
+        category_scope: "Kategorijos"
+        model_progress:
+          detail:
+            retry: "Bandykite dar kartą"
+            columns:
+              pending: "Laukiama"
+              total: "Viso"
+          targets:
+            post:
+              title: "Pranešimai"
+            topic:
+              title: "Temos"
+            category:
+              title: "Kategorijos"
+            tag:
+              title: "Žymos"
         stats:
           eta_minutes:
             one: "%{count} minutė"
@@ -256,11 +286,13 @@ lt:
             few: "%{count} pranešimai"
             many: "%{count} pranešimų"
             other: "%{count} pranešimų"
+        theme_translations:
+          translate:
+            label: "Versti"
       spam:
         short_title: "Šlamštas"
         title: "Šlamšto tvarkymo konfigūravimas"
         select_llm: "Pasirinkite teisės magistro laipsnį (LLM)"
-        select_persona: "Pasirinkite asmenį"
         custom_instructions: "Individualūs nurodymai"
         custom_instructions_help: "Jūsų svetainei pritaikytos instrukcijos, padedančios dirbtiniam intelektui atpažinti šlamštą, pvz., „Aktyviau nuskaitykite įrašus ne anglų kalba“."
         last_seven_days: "Paskutinės 7 dienos"
@@ -293,8 +325,37 @@ lt:
         periods:
           last_day: "Paskutinės 24 valandos"
           custom: "Pasirinktinis..."
-      ai_persona:
-        back: "Atgal"
+      logs:
+        short_title: "Įrašai"
+        apply: "Kandidatuoti"
+        successful: "Sėkmingas"
+        failed: "Nepavyko"
+        unknown: "Nežinoma"
+        time: "Laikas"
+        when: "Kada"
+        model: "Modelis"
+        request: "Užklausa"
+        user: "Narys"
+        context: "Kontekstas"
+        topic: "Tema"
+        post: "Įrašai"
+        post_short: "Įrašas %{id}"
+        duration: "Trukmė"
+        actions: "Veiksmai"
+        view_details: "Detalės"
+        periods:
+          day: "Paskutinės 24 valandos"
+          week: "Paskutinės 7 dienos"
+          custom: "Išskirtinės"
+        detail:
+          request: "Užklausa"
+          response: "Atsakymas"
+          context: "Kontekstas"
+        retention:
+          summary_stage: "Santrauka"
+          deleted_stage: "Ištrinta"
+          save: "Saugoti"
+      ai_agent:
         name: "Vardas"
         edit: "Redaguoti"
         export: "Eksportuoti"
@@ -306,6 +367,11 @@ lt:
         delete: "Pašalinti"
         temperature: "Temperatūra"
         top_p: "Viršutinė P"
+        thinking_effort_options:
+          none: "Nieko"
+          low: "Žemas"
+          medium: "Vidutinis"
+          high: "Aukštas"
         response_format:
           open_modal: "Redaguoti"
           modal:
@@ -317,7 +383,6 @@ lt:
           title: "Įkėlimai"
           uploading: "Įkeliama"
       tools:
-        back: "Atgal"
         export: "Eksportuoti"
         import: "Importuoti"
         name: "Vardas"
@@ -333,17 +398,31 @@ lt:
         short_title: "Įgaliojimai"
         name: "Vardas"
         secret: "Reikšmė"
-        back: "Atgal"
         save: "Saugoti"
         edit: "Redaguoti"
         delete: "Pašalinti"
         embedding: "Įterpimai"
         tool: "Įrankis"
-      llms:
-        display_name: "Vardas"
+      mcp_servers:
+        name: "Vardas"
+        description: "Aprašymas"
+        url: "Nuoroda"
+        oauth_statuses:
+          connected: "Prijungtas"
+        oauth_connect: "Prisijungti"
+        enabled: "Galimas"
         save: "Saugoti"
         edit: "Redaguoti"
-        back: "Atgal"
+        delete: "Pašalinti"
+        tools_modal:
+          required: "Privalomi"
+      llms:
+        display_name: "Vardas"
+        vision_modes:
+          disabled:
+            title: "Uždrausta"
+        save: "Saugoti"
+        edit: "Redaguoti"
         delete: Pašalinti
         quotas:
           group: "Grupė"
@@ -364,7 +443,6 @@ lt:
         tests:
           success: "Sėkmingai!"
         providers:
-          google: "Google"
           fake: "Išskirtinės"
       ai_helper:
         context_menu:
@@ -384,13 +462,10 @@ lt:
         thumbnail_suggestions:
           select: "Pasirinkite"
           try_again: "Bandyti dar kartą"
-        image_caption:
-          button_label: "Antraštė su AI"
-          generating: "Generuojama antraštė..."
-          credits: "Antraštė teikiama AI"
-          save_caption: "Saugoti"
+      reviewables:
+        ai_tool_action:
+          tool: "Įrankis"
       embeddings:
-        back: "Atgal"
         save: "Saugoti"
         delete: "Pašalinti"
         edit: "Redaguoti"
@@ -401,9 +476,9 @@ lt:
           google: "Google"
           fake: "Išskirtinės"
       ai_bot:
-        persona: "Persona"
-        llm: "Modelis"
+        llm: "Modelis:"
         debug_ai_modal:
+          duration_label: "Trukmė:"
           request: "Užklausa"
           response: "Atsakymas"
           next_log: "Kitas"
@@ -419,6 +494,7 @@ lt:
           today: "Šandien"
           last_7_days: "Paskutinės 7 dienos"
           last_30_days: "Paskutinės 30 dienų"
+          editing_post: "Redaguojamas įrašas"
       sentiments:
         sentiment_analysis:
           filter_types:
@@ -433,8 +509,18 @@ lt:
         chat:
           summarize: "Apibendrinti"
       discobot_discoveries:
-        regular_results: "Temos"
-        collapse: "Suskleisti"
-        tooltip:
-          actions:
-            disable: "Išjungti"
+        main_title: "Paklauskite AI"
+        legacy:
+          regular_results: "Temos"
+          collapse: "Suskleisti"
+          tooltip:
+            actions:
+              disable: "Išjungti"
+        search_type: "AI"
+        search_all_topics: "Visos temos"
+        search_messages: "Žinutės"
+        ask_ai: "AI"
+    review:
+      types:
+        reviewable_ai_tool_action:
+          title: "DI įrankio veiksmas"

@@ -1,10 +1,9 @@
 /* eslint-disable ember/no-classic-components */
 import Component from "@ember/component";
-import EmberObject, { action } from "@ember/object";
+import EmberObject, { action, computed } from "@ember/object";
 import { tagName } from "@ember-decorators/component";
 import PreferenceCheckbox from "discourse/components/preference-checkbox";
 import UserNotificationScheduleDay from "discourse/components/user-notification-schedule-day";
-import discourseComputed from "discourse/lib/decorators";
 import { i18n } from "discourse-i18n";
 
 const DAYS = [
@@ -22,6 +21,23 @@ class Day extends EmberObject {
   startTimeOptions = null;
   model = null;
 
+  @computed("model.user_notification_schedule.day_{0,1,2,3,4,5,6}_start_time")
+  get startTimeValue() {
+    return this.model?.user_notification_schedule[`day_${this.id}_start_time`];
+  }
+
+  @computed("model.user_notification_schedule.day_{0,1,2,3,4,5,6}_start_time")
+  get endTimeOptions() {
+    return this.buildEndTimeOptionsFor(
+      this.model?.user_notification_schedule[`day_${this.id}_start_time`]
+    );
+  }
+
+  @computed("model.user_notification_schedule.day_{0,1,2,3,4,5,6}_end_time")
+  get endTimeValue() {
+    return this.model?.user_notification_schedule[`day_${this.id}_end_time`];
+  }
+
   @action
   onChangeStartTime(val) {
     this.startingTimeChangedForDay(val);
@@ -30,27 +46,6 @@ class Day extends EmberObject {
   @action
   onChangeEndTime(val) {
     this.set(`model.user_notification_schedule.day_${this.id}_end_time`, val);
-  }
-
-  @discourseComputed(
-    "model.user_notification_schedule.day_{0,1,2,3,4,5,6}_start_time"
-  )
-  startTimeValue(schedule) {
-    return schedule[`day_${this.id}_start_time`];
-  }
-
-  @discourseComputed(
-    "model.user_notification_schedule.day_{0,1,2,3,4,5,6}_start_time"
-  )
-  endTimeOptions(schedule) {
-    return this.buildEndTimeOptionsFor(schedule[`day_${this.id}_start_time`]);
-  }
-
-  @discourseComputed(
-    "model.user_notification_schedule.day_{0,1,2,3,4,5,6}_end_time"
-  )
-  endTimeValue(schedule) {
-    return schedule[`day_${this.id}_end_time`];
   }
 
   startingTimeChangedForDay(val) {
@@ -150,8 +145,8 @@ export default class UserNotificationSchedule extends Component {
           "user.notification_schedule.title"
         }}</label>
       <PreferenceCheckbox
-        @labelKey="user.notification_schedule.label"
         @checked={{this.model.user_notification_schedule.enabled}}
+        @labelKey="user.notification_schedule.label"
       />
 
       {{#if this.model.user_notification_schedule.enabled}}
@@ -162,12 +157,12 @@ export default class UserNotificationSchedule extends Component {
             {{#each this.days as |day|}}
               <UserNotificationScheduleDay
                 @day={{day.day}}
-                @startTimeOptions={{day.startTimeOptions}}
-                @startTimeValue={{day.startTimeValue}}
-                @onChangeStartTime={{day.onChangeStartTime}}
                 @endTimeOptions={{day.endTimeOptions}}
                 @endTimeValue={{day.endTimeValue}}
                 @onChangeEndTime={{day.onChangeEndTime}}
+                @onChangeStartTime={{day.onChangeStartTime}}
+                @startTimeOptions={{day.startTimeOptions}}
+                @startTimeValue={{day.startTimeValue}}
               />
             {{/each}}
           </tbody>

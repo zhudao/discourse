@@ -1,7 +1,7 @@
 /* eslint-disable ember/no-classic-components */
 import Component from "@ember/component";
 import { concat } from "@ember/helper";
-import { action } from "@ember/object";
+import { action, computed } from "@ember/object";
 import { service } from "@ember/service";
 import { tagName } from "@ember-decorators/component";
 import ScrubRejectedUserModal from "discourse/admin/components/modal/scrub-rejected-user";
@@ -9,7 +9,8 @@ import ReviewableField from "discourse/components/reviewable-field";
 import rawDate from "discourse/helpers/raw-date";
 import { ajax } from "discourse/lib/ajax";
 import { popupAjaxError } from "discourse/lib/ajax-error";
-import discourseComputed, { bind } from "discourse/lib/decorators";
+import { bind } from "discourse/lib/decorators";
+import { longDate } from "discourse/lib/formatter";
 import getUrl from "discourse/lib/get-url";
 import { i18n } from "discourse-i18n";
 
@@ -18,14 +19,34 @@ export default class ReviewableUser extends Component {
   @service modal;
   @service store;
 
-  @discourseComputed("reviewable.user_fields")
-  userFields(fields) {
-    return this.site.collectUserFields(fields);
+  @computed("reviewable.user_fields")
+  get userFields() {
+    return this.site.collectUserFields(this.reviewable?.user_fields);
   }
 
-  @discourseComputed("reviewable.payload")
-  isScrubbed(payload) {
-    return !!payload?.scrubbed_by;
+  @computed("reviewable.payload")
+  get isScrubbed() {
+    return !!this.reviewable?.payload?.scrubbed_by;
+  }
+
+  @computed("reviewable.target_user.silenced_till")
+  get silencedTill() {
+    return this.penaltyDate(this.reviewable?.target_user?.silenced_till);
+  }
+
+  @computed("reviewable.target_user.suspended_till")
+  get suspendedTill() {
+    return this.penaltyDate(this.reviewable?.target_user?.suspended_till);
+  }
+
+  penaltyDate(date) {
+    if (!date) {
+      return;
+    }
+
+    return moment().diff(date, "years") < -100
+      ? i18n("review.user.penalty_forever")
+      : longDate(date);
   }
 
   @action
@@ -101,6 +122,46 @@ export default class ReviewableUser extends Component {
                 {{/if}}
               </div>
             </div>
+            {{#if this.reviewable.target_user.silenced_till}}
+              <ReviewableField
+                @classes="reviewable-user-details silenced-till"
+                @name={{i18n "review.user.silenced_until"}}
+                @value={{this.silencedTill}}
+              />
+              <ReviewableField
+                @classes="reviewable-user-details silence-reason"
+                @name={{i18n "review.user.silence_reason"}}
+                @value={{this.reviewable.target_user.silence_reason}}
+              />
+            {{/if}}
+
+            {{#if this.reviewable.target_user.suspended_till}}
+              <ReviewableField
+                @classes="reviewable-user-details suspended-till"
+                @name={{i18n "review.user.suspended_until"}}
+                @value={{this.suspendedTill}}
+              />
+              <ReviewableField
+                @classes="reviewable-user-details suspend-reason"
+                @name={{i18n "review.user.suspend_reason"}}
+                @value={{this.reviewable.target_user.suspend_reason}}
+              />
+            {{/if}}
+
+            {{#if this.reviewable.payload.avatar_url}}
+              <div class="reviewable-user-details avatar">
+                <div class="name">{{i18n "review.user.avatar"}}</div>
+                <div class="value">
+                  <img
+                    alt={{i18n "review.user.avatar"}}
+                    class="reviewable-user-avatar"
+                    loading="lazy"
+                    src={{this.reviewable.payload.avatar_url}}
+                  />
+                </div>
+              </div>
+            {{/if}}
+
             <ReviewableField
               @classes="reviewable-user-details name"
               @name={{i18n "review.user.name"}}
@@ -125,8 +186,8 @@ export default class ReviewableUser extends Component {
                 <div class="value">
                   <a
                     href={{this.reviewable.payload.website}}
-                    target="_blank"
                     rel="noopener noreferrer"
+                    target="_blank"
                   >{{this.reviewable.payload.website}}</a>
                 </div>
               </div>

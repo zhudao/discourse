@@ -1,12 +1,11 @@
 import { tracked } from "@glimmer/tracking";
 import Controller, { inject as controller } from "@ember/controller";
-import { action } from "@ember/object";
+import { action, computed } from "@ember/object";
 import { service } from "@ember/service";
 import { ajax } from "discourse/lib/ajax";
 import discourseDebounce from "discourse/lib/debounce";
-import discourseComputed from "discourse/lib/decorators";
 import { INPUT_DELAY } from "discourse/lib/environment";
-import { trackedArray } from "discourse/lib/tracked-tools";
+import { autoTrackedArray } from "discourse/lib/tracked-tools";
 
 export default class GroupAssigned extends Controller {
   @service router;
@@ -16,51 +15,26 @@ export default class GroupAssigned extends Controller {
   @tracked filterName = "";
   @tracked loading = false;
   @tracked offset = 0;
-  @trackedArray members = [];
+  @autoTrackedArray members = [];
 
-  @discourseComputed("router.currentRoute.queryParams.order")
-  order(order) {
-    return order || "";
+  @computed("router.currentRoute.queryParams.order")
+  get order() {
+    return this.router?.currentRoute?.queryParams?.order || "";
   }
 
-  @discourseComputed("router.currentRoute.queryParams.ascending")
-  ascending(ascending) {
-    return ascending || false;
+  @computed("router.currentRoute.queryParams.ascending")
+  get ascending() {
+    return this.router?.currentRoute?.queryParams?.ascending || false;
   }
 
-  @discourseComputed("router.currentRoute.queryParams.search")
-  search(search) {
-    return search || "";
+  @computed("router.currentRoute.queryParams.search")
+  get search() {
+    return this.router?.currentRoute?.queryParams?.search || "";
   }
 
-  @discourseComputed("site.mobileView")
-  isDesktop(mobileView) {
-    return !mobileView;
-  }
-
-  _setFilter(filter) {
-    this.set("loading", true);
-    this.set("offset", 0);
-    this.set("filter", filter);
-
-    const groupName = this.group.name;
-    ajax(`/assign/members/${groupName}`, {
-      type: "GET",
-      data: { filter: this.filter, offset: this.offset },
-    })
-      .then((result) => {
-        if (this.router.currentRoute.params.filter !== "everyone") {
-          this.router.transitionTo(
-            "group.assigned.show",
-            groupName,
-            "everyone"
-          );
-        }
-        this.set("members", result.members);
-      })
-      .finally(() => {
-        this.set("loading", false);
-      });
+  @computed("site.mobileView")
+  get isDesktop() {
+    return !this.site?.mobileView;
   }
 
   async findMembers(refresh) {
@@ -98,5 +72,30 @@ export default class GroupAssigned extends Controller {
   @action
   onChangeFilterName(value) {
     discourseDebounce(this, this._setFilter, value, INPUT_DELAY * 2);
+  }
+
+  _setFilter(filter) {
+    this.set("loading", true);
+    this.set("offset", 0);
+    this.set("filter", filter);
+
+    const groupName = this.group.name;
+    ajax(`/assign/members/${groupName}`, {
+      type: "GET",
+      data: { filter: this.filter, offset: this.offset },
+    })
+      .then((result) => {
+        if (this.router.currentRoute.params.filter !== "everyone") {
+          this.router.transitionTo(
+            "group.assigned.show",
+            groupName,
+            "everyone"
+          );
+        }
+        this.set("members", result.members);
+      })
+      .finally(() => {
+        this.set("loading", false);
+      });
   }
 }

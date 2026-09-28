@@ -1,20 +1,23 @@
 import { cached, tracked } from "@glimmer/tracking";
-import EmberObject, { get } from "@ember/object";
-import { alias, and, equal, not, or } from "@ember/object/computed";
+import EmberObject, { computed, get, set } from "@ember/object";
+import { dependentKeyCompat } from "@ember/object/compat";
 import { service } from "@ember/service";
 import { isEmpty } from "@ember/utils";
 import { Promise } from "rsvp";
 import { resolveShareUrl } from "discourse/helpers/share-url";
 import { ajax } from "discourse/lib/ajax";
 import { popupAjaxError } from "discourse/lib/ajax-error";
-import { propertyEqual } from "discourse/lib/computed";
-import discourseComputed from "discourse/lib/decorators";
+import {
+  clearModelFields,
+  modelFieldNames,
+  registerModelField,
+  stampModelClass,
+} from "discourse/lib/model-extensions";
+import { deepEqual } from "discourse/lib/object";
 import { cook } from "discourse/lib/text";
 import { fancyTitle } from "discourse/lib/topic-fancy-title";
-import {
-  defineTrackedProperty,
-  enumerateTrackedKeys,
-} from "discourse/lib/tracked-tools";
+import { enumerateTrackedKeys } from "discourse/lib/tracked-tools";
+import { applyValueTransformer } from "discourse/lib/transformer";
 import { userPath } from "discourse/lib/url";
 import { postUrl } from "discourse/lib/utilities";
 import ActionSummary from "discourse/models/action-summary";
@@ -25,8 +28,6 @@ import Site from "discourse/models/site";
 import User from "discourse/models/user";
 import { i18n } from "discourse-i18n";
 
-const pluginTrackedProperties = new Set();
-
 /**
  * @internal
  * Adds a tracked property to the post model.
@@ -36,7 +37,8 @@ const pluginTrackedProperties = new Set();
  * @param {string} propertyKey - The key of the property to track.
  */
 export function _addTrackedPostProperty(propertyKey) {
-  pluginTrackedProperties.add(propertyKey);
+  stampModelClass(Post, "post");
+  registerModelField("post", propertyKey);
 }
 
 /**
@@ -45,7 +47,7 @@ export function _addTrackedPostProperty(propertyKey) {
  * USE ONLY FOR TESTING PURPOSES.
  */
 export function clearAddedTrackedPostProperties() {
-  pluginTrackedProperties.clear();
+  clearModelFields("post");
 }
 
 export default class Post extends RestModel {
@@ -144,7 +146,6 @@ export default class Post extends RestModel {
   @tracked badges_granted;
   @tracked bookmarked;
   @tracked can_delete;
-  @tracked can_edit;
   @tracked can_permanently_delete;
   @tracked can_recover;
   @tracked can_see_hidden_post;
@@ -155,6 +156,7 @@ export default class Post extends RestModel {
   @tracked customShare = null;
   @tracked deleted_at;
   @tracked deleted_by;
+  @tracked deleted_post_placeholder;
   @tracked excerpt;
   @tracked expandedExcerpt;
   @tracked group_moderator;
@@ -168,6 +170,8 @@ export default class Post extends RestModel {
   @tracked likeAction;
   @tracked link_counts;
   @tracked localization_outdated;
+  @tracked localizedCooked;
+  @tracked localized_oneboxes;
   @tracked locked;
   @tracked moderator;
   @tracked name;
@@ -192,6 +196,7 @@ export default class Post extends RestModel {
   @tracked user_custom_fields;
   @tracked user_deleted;
   @tracked user_id;
+  @tracked user_locale;
   @tracked user_suspended;
   @tracked user_title;
   @tracked username;
@@ -199,33 +204,87 @@ export default class Post extends RestModel {
   @tracked via_email;
   @tracked wiki;
   @tracked yours;
+  @tracked _can_edit;
+  // for compatibility with existing code
+  // mark fist post as deleted if topic was deleted
+  // post is either highlighted as deleted or hidden/removed from the post stream
+  // post or content still can be recovered
 
-  @alias("can_edit") canEdit; // for compatibility with existing code
-  @equal("trust_level", 0) new_user;
-  @equal("post_number", 1) firstPost;
-  @and("firstPost", "topic.deleted_at") deletedViaTopic; // mark fist post as deleted if topic was deleted
-  @or("deleted_at", "deletedViaTopic") deleted; // post is either highlighted as deleted or hidden/removed from the post stream
-  @not("deleted") notDeleted;
-  @or("deleted_at", "user_deleted") recoverable; // post or content still can be recovered
-  @propertyEqual("topic.details.created_by.id", "user_id") topicOwner;
-  @alias("topic.details.created_by.id") topicCreatedById;
-
-  constructor() {
-    super(...arguments);
-
-    // adds tracked properties defined by plugin to the instance
-    pluginTrackedProperties.forEach((propertyKey) => {
-      defineTrackedProperty(this, propertyKey);
+  @dependentKeyCompat
+  get can_edit() {
+    return applyValueTransformer("post-can-edit", this._can_edit, {
+      post: this,
     });
+  }
+
+  set can_edit(value) {
+    this._can_edit = value;
+  }
+
+  @dependentKeyCompat
+  get canEdit() {
+    return this.can_edit;
+  }
+
+  set canEdit(value) {
+    this.can_edit = value;
+  }
+
+  @computed("topic.details.created_by.id")
+  get topicCreatedById() {
+    return this.topic?.details?.created_by?.id;
+  }
+
+  set topicCreatedById(value) {
+    set(this, "topic.details.created_by.id", value);
+  }
+
+  @dependentKeyCompat
+  get new_user() {
+    return this.trust_level === 0;
+  }
+
+  @dependentKeyCompat
+  get firstPost() {
+    return this.post_number === 1;
+  }
+
+  @computed("firstPost", "topic.deleted_at")
+  get deletedViaTopic() {
+    return this.firstPost && this.topic?.deleted_at;
+  }
+
+  @computed("deleted_at", "deletedViaTopic")
+  get deleted() {
+    return this.deleted_at || this.deletedViaTopic;
+  }
+
+  @computed("deleted")
+  get notDeleted() {
+    return !this.deleted;
+  }
+
+  @dependentKeyCompat
+  get recoverable() {
+    return this.deleted_at || this.user_deleted;
+  }
+
+  @computed("topic.details.created_by.id", "user_id")
+  get topicOwner() {
+    return deepEqual(this.topic?.details?.created_by?.id, this.user_id);
   }
 
   get shareUrl() {
     return this.customShare || resolveShareUrl(this.url, this.currentUser);
   }
 
-  @discourseComputed("name", "username")
-  showName(name, username) {
-    return name && name !== username && this.siteSettings.display_name_on_posts;
+  @computed("name", "username")
+  get showName() {
+    return (
+      this.name &&
+      this.name !== this.username &&
+      this.siteSettings.display_name_on_posts
+    );
   }
 
   get deletedBy() {
@@ -236,36 +295,24 @@ export default class Post extends RestModel {
     return this.firstPost ? this.topic?.deleted_at : this.deleted_at;
   }
 
-  @discourseComputed("post_number", "topic_id", "topic.slug")
-  url(post_number, topic_id, topicSlug) {
+  @computed("post_number", "topic_id", "topic.slug")
+  get url() {
     return postUrl(
-      topicSlug || this.topic_slug,
-      topic_id || this.get("topic.id"),
-      post_number
+      this.topic?.slug || this.topic_slug,
+      this.topic_id || this.get("topic.id"),
+      this.post_number
     );
   }
 
   // Don't drop the /1
-  @discourseComputed("post_number", "url")
-  urlWithNumber(postNumber, baseUrl) {
-    return postNumber === 1 ? `${baseUrl}/1` : baseUrl;
+  @computed("post_number", "url")
+  get urlWithNumber() {
+    return this.post_number === 1 ? `${this.url}/1` : this.url;
   }
 
-  @discourseComputed("username")
-  usernameUrl(username) {
-    return userPath(username);
-  }
-
-  updatePostField(field, value) {
-    const data = {};
-    data[field] = value;
-
-    return ajax(`/posts/${this.id}/${field}`, { type: "PUT", data })
-      .then((response) => {
-        this.set(field, value);
-        return response;
-      })
-      .catch(popupAjaxError);
+  @computed("username")
+  get usernameUrl() {
+    return userPath(this.username);
   }
 
   get internalLinks() {
@@ -276,8 +323,8 @@ export default class Post extends RestModel {
     return this.link_counts.filter((link) => link.internal && link.title);
   }
 
-  @discourseComputed("actions_summary.@each.can_act")
-  flagsAvailable() {
+  @computed("actions_summary.@each.can_act")
+  get flagsAvailable() {
     // TODO: Investigate why `this.site` is sometimes null when running
     // Search - Search with context
     if (!this.site) {
@@ -289,17 +336,20 @@ export default class Post extends RestModel {
     );
   }
 
-  @discourseComputed(
-    "siteSettings.use_pg_headlines_for_excerpt",
-    "topic_title_headline"
-  )
-  useTopicTitleHeadline(enabled, title) {
-    return enabled && title;
+  @computed("siteSettings.use_pg_headlines_for_excerpt", "topic_title_headline")
+  get useTopicTitleHeadline() {
+    return (
+      this.siteSettings?.use_pg_headlines_for_excerpt &&
+      this.topic_title_headline
+    );
   }
 
-  @discourseComputed("topic_title_headline")
-  topicTitleHeadline(title) {
-    return fancyTitle(title, this.siteSettings.support_mixed_text_direction);
+  @computed("topic_title_headline")
+  get topicTitleHeadline() {
+    return fancyTitle(
+      this.topic_title_headline,
+      this.siteSettings.support_mixed_text_direction
+    );
   }
 
   get canBookmark() {
@@ -393,10 +443,16 @@ export default class Post extends RestModel {
     return this.post_type === this.site.post_types.moderator_action;
   }
 
+  get isWarning() {
+    return this.topic?.is_warning;
+  }
+
   get isSmallAction() {
-    return (
+    return applyValueTransformer(
+      "post-is-small-action",
       this.post_type === this.site.post_types.small_action ||
-      this.action_code === "split_topic"
+        this.action_code === "split_topic",
+      { post: this }
     );
   }
 
@@ -454,6 +510,7 @@ export default class Post extends RestModel {
       flair_group_id: this.flair_group_id,
       flair_name: this.flair_name,
       flair_url: this.flair_url,
+      locale: this.user_locale,
       moderator: this.moderator,
       primary_group_name: this.primary_group_name,
       status: this.user_status,
@@ -461,6 +518,77 @@ export default class Post extends RestModel {
       trust_level: this.trust_level,
       custom_fields: this.user_custom_fields,
     });
+  }
+
+  get topicNotificationLevel() {
+    return this.topic.details.notification_level;
+  }
+
+  get userBadges() {
+    if (!this.topic?.user_badges) {
+      return;
+    }
+    const badgeIds = this.topic.user_badges.users[this.user_id]?.badge_ids;
+    if (badgeIds) {
+      return badgeIds.map((badgeId) => this.topic.user_badges.badges[badgeId]);
+    }
+  }
+
+  @cached
+  get badgesGranted() {
+    return this.badges_granted?.map((json) => {
+      const badges = Badge.createFromJson(json);
+      return Array.isArray(badges) ? badges[0] : badges;
+    });
+  }
+
+  get requestedGroupName() {
+    return this.post_number === 1 ? this.topic?.requested_group_name : null;
+  }
+
+  get expandablePost() {
+    return this.post_number === 1 && !!this.topic?.expandable_first_post;
+  }
+
+  get topicUrl() {
+    return this.topic?.url;
+  }
+
+  @cached
+  get actionsSummary() {
+    return this.actions_summary
+      ?.filter((postAction) => {
+        return postAction.actionType.name_key !== "like" && postAction.acted;
+      })
+      ?.map((postAction) => {
+        return {
+          id: postAction.id,
+          postId: this.id,
+          action: postAction.actionType.name_key,
+          canUndo: postAction.can_undo,
+          description: postAction.actionType.translatedDescription,
+        };
+      });
+  }
+
+  get displayDate() {
+    if (this.wiki && this.last_wiki_edit) {
+      return this.last_wiki_edit;
+    } else {
+      return this.created_at;
+    }
+  }
+
+  updatePostField(field, value) {
+    const data = {};
+    data[field] = value;
+
+    return ajax(`/posts/${this.id}/${field}`, { type: "PUT", data })
+      .then((response) => {
+        this.set(field, value);
+        return response;
+      })
+      .catch(popupAjaxError);
   }
 
   afterUpdate(res) {
@@ -497,8 +625,13 @@ export default class Post extends RestModel {
 
   // Expands the first post's content, if embedded and shortened.
   async expand() {
-    const post = await ajax(`/posts/${this.id}/expand-embed`);
-    this.cooked = `<section class="expanded-embed">${post.cooked}</section>`;
+    try {
+      const post = await ajax(`/posts/${this.id}/expand-embed`);
+      this.cooked = `<section class="expanded-embed">${post.cooked}</section>`;
+    } catch (error) {
+      popupAjaxError.call(this, error);
+      throw error;
+    }
   }
 
   // Recover a deleted post
@@ -580,24 +713,30 @@ export default class Post extends RestModel {
    This can only be called after setDeletedState was called, but the delete
    failed on the server.
    **/
-  undoDeleteState() {
-    if (this.oldCooked) {
-      this.setProperties({
-        deleted_at: null,
-        deleted_by: null,
-        cooked: this.oldCooked,
-        version: this.version - 1,
-        can_recover: false,
-        can_delete: true,
-        user_deleted: false,
-        can_edit: this.oldCanEdit ?? false,
-      });
+  undoDeleteState({ force_destroy = false } = {}) {
+    if (force_destroy || !this.oldCooked) {
+      return;
     }
+
+    this.setProperties({
+      deleted_at: null,
+      deleted_by: null,
+      cooked: this.oldCooked,
+      version: this.version - 1,
+      can_recover: false,
+      can_delete: true,
+      user_deleted: false,
+      can_edit: this.oldCanEdit ?? false,
+    });
   }
 
   destroy(deletedBy, opts) {
-    return this.setDeletedState(deletedBy).then(() => {
-      return ajax("/posts/" + this.id, {
+    const maybeSetDeletedState = opts?.force_destroy
+      ? Promise.resolve()
+      : this.setDeletedState(deletedBy);
+
+    return maybeSetDeletedState.then(() => {
+      return ajax(`/posts/${this.id}`, {
         data: { context: window.location.pathname, ...opts },
         type: "DELETE",
       });
@@ -612,7 +751,7 @@ export default class Post extends RestModel {
     [
       ...Object.keys(otherPost),
       ...enumerateTrackedKeys(otherPost),
-      ...pluginTrackedProperties,
+      ...modelFieldNames("post"),
     ].forEach((key) => {
       let value = otherPost[key],
         oldValue = this[key];
@@ -648,6 +787,22 @@ export default class Post extends RestModel {
     return ajax(`/posts/${this.id}/cooked.json`).then((result) => {
       this.setProperties({ cooked: result.cooked, cooked_hidden: false });
     });
+  }
+
+  async toggleLocalizedContent() {
+    if (this.localizedCooked) {
+      this.setProperties({
+        cooked: this.localizedCooked,
+        localizedCooked: null,
+      });
+    } else {
+      const result = await ajax(`/posts/${this.id}/cooked.json`);
+
+      this.setProperties({
+        localizedCooked: this.cooked,
+        cooked: result.cooked,
+      });
+    }
   }
 
   rebake() {
@@ -741,64 +896,5 @@ export default class Post extends RestModel {
     return ajax(`/posts/${this.id}/revisions/${version}/revert`, {
       type: "PUT",
     });
-  }
-
-  get topicNotificationLevel() {
-    return this.topic.details.notification_level;
-  }
-
-  get userBadges() {
-    if (!this.topic?.user_badges) {
-      return;
-    }
-    const badgeIds = this.topic.user_badges.users[this.user_id]?.badge_ids;
-    if (badgeIds) {
-      return badgeIds.map((badgeId) => this.topic.user_badges.badges[badgeId]);
-    }
-  }
-
-  @cached
-  get badgesGranted() {
-    return this.badges_granted?.map((json) => {
-      const badges = Badge.createFromJson(json);
-      return Array.isArray(badges) ? badges[0] : badges;
-    });
-  }
-
-  get requestedGroupName() {
-    return this.post_number === 1 ? this.topic?.requested_group_name : null;
-  }
-
-  get expandablePost() {
-    return this.post_number === 1 && !!this.topic?.expandable_first_post;
-  }
-
-  get topicUrl() {
-    return this.topic?.url;
-  }
-
-  @cached
-  get actionsSummary() {
-    return this.actions_summary
-      ?.filter((postAction) => {
-        return postAction.actionType.name_key !== "like" && postAction.acted;
-      })
-      ?.map((postAction) => {
-        return {
-          id: postAction.id,
-          postId: this.id,
-          action: postAction.actionType.name_key,
-          canUndo: postAction.can_undo,
-          description: postAction.actionType.translatedDescription,
-        };
-      });
-  }
-
-  get displayDate() {
-    if (this.wiki && this.last_wiki_edit) {
-      return this.last_wiki_edit;
-    } else {
-      return this.created_at;
-    }
   }
 }

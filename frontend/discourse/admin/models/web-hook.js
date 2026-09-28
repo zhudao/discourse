@@ -4,7 +4,6 @@ import { computed } from "@ember/object";
 import { isEmpty } from "@ember/utils";
 import { observes } from "@ember-decorators/object";
 import { uniqueItemsFromArray } from "discourse/lib/array-tools";
-import discourseComputed from "discourse/lib/decorators";
 import Group from "discourse/models/group";
 import RestModel from "discourse/models/rest";
 import Site from "discourse/models/site";
@@ -20,17 +19,17 @@ class WebHookExtras {
     this.grouped_event_types = args.grouped_event_types || [];
   }
 
+  get categoriesById() {
+    if (this.categories) {
+      return new Map(this.categories.map((c) => [c.id, c]));
+    }
+  }
+
   addCategories(categories) {
     this.categories = uniqueItemsFromArray(
       this.categories.concat(categories),
       "id"
     );
-  }
-
-  get categoriesById() {
-    if (this.categories) {
-      return new Map(this.categories.map((c) => [c.id, c]));
-    }
   }
 
   findCategoryById(id) {
@@ -74,6 +73,18 @@ export default class WebHook extends RestModel {
     );
   }
 
+  @computed("wildcard_web_hook", "web_hook_event_types.[]")
+  get description() {
+    let desc = "";
+
+    this.web_hook_event_types?.forEach((type) => {
+      const name = `${type.name.toLowerCase()}_event`;
+      desc += desc !== "" ? `, ${name}` : name;
+    });
+
+    return this.wildcard_web_hook ? "*" : desc;
+  }
+
   @observes("group_ids")
   updateGroupsFilter() {
     const groupIds = this.group_ids;
@@ -90,18 +101,6 @@ export default class WebHook extends RestModel {
 
   groupFinder(term) {
     return Group.findAll({ term, ignore_automatic: false });
-  }
-
-  @discourseComputed("wildcard_web_hook", "web_hook_event_types.[]")
-  description(isWildcardWebHook, types) {
-    let desc = "";
-
-    types.forEach((type) => {
-      const name = `${type.name.toLowerCase()}_event`;
-      desc += desc !== "" ? `, ${name}` : name;
-    });
-
-    return isWildcardWebHook ? "*" : desc;
   }
 
   createProperties() {

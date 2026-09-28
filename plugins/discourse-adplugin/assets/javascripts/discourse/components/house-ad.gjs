@@ -1,16 +1,18 @@
-import { htmlSafe } from "@ember/template";
+import { computed } from "@ember/object";
+import { trustHTML } from "@ember/template";
 import { isBlank } from "@ember/utils";
 import { tagName } from "@ember-decorators/component";
-import concatClass from "discourse/helpers/concat-class";
-import discourseComputed from "discourse/lib/decorators";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
 import AdComponent from "./ad-component";
 
 const adIndex = {
+  above_site_header: null,
   topic_list_top: null,
   topic_above_post_stream: null,
   topic_above_suggested: null,
   post_bottom: null,
   topic_list_between: null,
+  nested_roots_between: null,
 };
 
 @tagName("")
@@ -26,55 +28,44 @@ export default class HouseAd extends AdComponent {
     }
   };
 
-  @discourseComputed
-  colspanAttribute() {
+  @computed
+  get colspanAttribute() {
     return this.tagName === "td" ? "5" : null;
   }
 
-  @discourseComputed("placement", "showAd")
-  adUnitClass(placement, showAd) {
-    return showAd ? `house-${placement}` : "";
+  @computed("placement", "showAd")
+  get adUnitClass() {
+    return this.showAd ? `house-${this.placement}` : "";
   }
 
-  @discourseComputed(
-    "showToGroups",
-    "showAfterPost",
-    "showAfterTopicListItem",
-    "showOnCurrentPage"
-  )
-  showAd(
-    showToGroups,
-    showAfterPost,
-    showAfterTopicListItem,
-    showOnCurrentPage
-  ) {
+  @computed("showToGroups", "showAfterPlacement", "showOnCurrentPage")
+  get showAd() {
     return (
-      showToGroups &&
-      (showAfterPost || showAfterTopicListItem) &&
-      showOnCurrentPage
+      this.showToGroups && this.showAfterPlacement && this.showOnCurrentPage
     );
   }
 
-  @discourseComputed("postNumber", "placement")
-  showAfterPost(postNumber, placement) {
-    if (!postNumber && placement !== "topic-list-between") {
-      return true;
+  @computed("placement", "postNumber", "indexNumber")
+  get showAfterPlacement() {
+    if (this.placement === "topic-list-between") {
+      return this.isNthTopicListItem(
+        parseInt(this.site.get("house_creatives.settings.after_nth_topic"), 10)
+      );
     }
 
-    return this.isNthPost(
-      parseInt(this.site.get("house_creatives.settings.after_nth_post"), 10)
-    );
-  }
-
-  @discourseComputed("placement")
-  showAfterTopicListItem(placement) {
-    if (placement !== "topic-list-between") {
-      return true;
+    if (this.placement === "nested-roots-between") {
+      return this.isNthTopicListItem(
+        parseInt(this.site.get("house_creatives.settings.after_nth_root"), 10)
+      );
     }
 
-    return this.isNthTopicListItem(
-      parseInt(this.site.get("house_creatives.settings.after_nth_topic"), 10)
-    );
+    if (this.postNumber) {
+      return this.isNthPost(
+        parseInt(this.site.get("house_creatives.settings.after_nth_post"), 10)
+      );
+    }
+
+    return true;
   }
 
   chooseAdHtml() {
@@ -193,13 +184,9 @@ export default class HouseAd extends AdComponent {
   }
 
   <template>
-    <div
-      colspan={{this.colspanAttribute}}
-      class={{concatClass "house-creative" this.adUnitClass}}
-      ...attributes
-    >
+    <div class={{dConcatClass "house-creative" this.adUnitClass}} ...attributes>
       {{#if this.showAd}}
-        {{htmlSafe this.adHtml}}
+        {{trustHTML this.adHtml}}
       {{/if}}
     </div>
   </template>

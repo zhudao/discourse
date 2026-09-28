@@ -24,7 +24,6 @@ he:
       answer_count:
         one: "תשובה %{count}"
         two: "%{count} תשובות"
-        many: "%{count} תשובות"
         other: "%{count} תשובות"
   site_settings:
     qa_tags: "תגיות להפעלת שו\"ת על נושא"
@@ -37,11 +36,6 @@ he:
   discourse_post_voting:
     reviewables:
       actions:
-        comment_actions:
-          bundle_title: "מה לעשות עם ההערה?"
-        no_action_comment:
-          title: "אין פעולה"
-          description: "להשאיר את ההערה כפי שהיא."
         agree_and_keep_comment:
           title: "להשאיר את התגובה"
           description: "הבעת הסכמה עם הדגל והשארת התגובה ללא שינוי."
@@ -54,9 +48,21 @@ he:
         agree_and_delete:
           title: "מחיקת תגובה"
           description: "למחוק את התגובה כדי שמשתמשים לא יוכלו לראות אותה."
+        agree_and_suspend:
+          title: "השעיית משתמש"
+          description: "הבעת הסכמה עם הדגל והשעיית המשתמש."
+        agree_and_silence:
+          title: "השתקת משתמש"
+          description: "הבעת הסכמה עם הדגל והשתקת המשתמש."
         disagree_and_restore:
           title: "לסרב ולשחזר תגובה"
           description: "לשחזר את התגובה כדי שכל המשתמשים יוכלו לראות אותה."
+        disagree:
+          title: "להשאיר את התגובה"
+        ignore:
+          title: "התעלמות מדגל"
+        delete_and_agree:
+          description: "התעלמות מהדגל על ידי הסרתו מהתור ומחיקת התגובה."
   post_action_types:
     vote:
       title: "הצבעה"
@@ -71,7 +77,6 @@ he:
       undo_vote_action_window:
         one: "אי אפשר לבטל הצבעה דקה %{count} לאחר ההצבעה."
         two: "אי אפשר לבטל הצבעה %{count} דקות לאחר ההצבעה."
-        many: "אי אפשר לבטל הצבעה %{count} דקות לאחר ההצבעה."
         other: "אי אפשר לבטל הצבעה %{count} דקות לאחר ההצבעה."
       one_vote_per_post: "אפשר להצביע רק פעם אחת לכל פוסט."
       one_vote_per_comment: "אפשר להצביע רק פעם אחת לכל תגובה."
@@ -110,6 +115,10 @@ he:
           disagree_and_restore:
             title: "לסרב ולשחזר תגובה"
             description: "לשחזר את התגובה כדי שכל המשתמשים יוכלו לראות אותה."
+          disagree:
+            title: "להשאיר את התגובה"
+          ignore:
+            title: "התעלמות מדגל"
         transcript:
           view: "הצגת תמליל התגובות הקודמות"
       reviewable_score_types:

@@ -14,12 +14,13 @@ export default class CopyReviewableNoteToUserOption extends Component {
 
   <template>
     <@form.Field
+      @format="full"
       @name="copy_note_to_user"
       @title={{i18n "user_notes.copy_reviewable_note" username=this.username}}
-      @format="full"
+      @type="checkbox"
       as |field|
     >
-      <field.Checkbox />
+      <field.Control />
     </@form.Field>
   </template>
 }

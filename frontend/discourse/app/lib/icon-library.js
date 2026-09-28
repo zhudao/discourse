@@ -1,13 +1,11 @@
 import deprecated from "discourse/lib/deprecated";
 import { isDevelopment } from "discourse/lib/environment";
 import escape from "discourse/lib/escape";
-import { warnWidgetsDecommissioned } from "discourse/widgets/widget";
 import { i18n } from "discourse-i18n";
 
 export const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 let _renderers = [];
 
-let warnMissingIcons = true;
 let _iconList;
 
 export const REPLACEMENTS = {
@@ -20,8 +18,8 @@ export const REPLACEMENTS = {
   "d-drop-collapsed": "angle-right",
   "d-unliked": "far-heart",
   "d-liked": "heart",
-  "d-post-share": "link",
-  "d-topic-share": "link",
+  "d-post-share": "arrow-up-from-bracket",
+  "d-topic-share": "arrow-up-from-bracket",
   "notification.mentioned": "at",
   "notification.group_mentioned": "users",
   "notification.quoted": "quote-right",
@@ -63,14 +61,6 @@ export function replaceIcon(source, destination) {
   REPLACEMENTS[source] = destination;
 }
 
-export function disableMissingIconWarning() {
-  warnMissingIcons = false;
-}
-
-export function enableMissingIconWarning() {
-  warnMissingIcons = false;
-}
-
 export function renderIcon(renderType, id, params) {
   params ||= {};
 
@@ -89,17 +79,14 @@ export function renderIcon(renderType, id, params) {
   }
 }
 
+/**
+ * @param {string} id - The icon id.
+ * @param {object} [params] - Options passed to the icon renderer. Set
+ *   `ignoreMissing` where the icon is knowingly outside the sprite subset, to
+ *   skip the development-mode missing-icon warning.
+ */
 export function iconHTML(id, params) {
   return renderIcon("string", id, params);
-}
-
-/**
- * @deprecated The widget rendering system has been decommissioned.
- * - If you need to create DOM nodes directly, use `iconElement` instead.
- * - If you need to render icons in a template, use the `{{icon}}` helper.
- */
-export function iconNode() {
-  warnWidgetsDecommissioned();
 }
 
 export function iconElement(id, params) {
@@ -120,11 +107,9 @@ export function registerIconRenderer(renderer) {
 }
 
 function iconClasses(icon, params) {
-  // "notification." is invalid syntax for classes, use replacement instead
+  // dots are invalid syntax for classes, use replacement instead
   const dClass =
-    icon.replacementId && icon.id.includes("notification.")
-      ? icon.replacementId
-      : icon.id;
+    icon.replacementId && icon.id.includes(".") ? icon.replacementId : icon.id;
 
   let classNames = `fa d-icon d-icon-${dClass} svg-icon fa-width-auto`;
 
@@ -136,26 +121,29 @@ function iconClasses(icon, params) {
 }
 
 export function setIconList(iconList) {
-  _iconList = iconList;
+  _iconList = new Set(iconList);
 }
 
 export function isExistingIconId(id) {
-  return _iconList?.includes(id);
+  return _iconList?.has(id);
 }
 
 function warnIfMissing(id) {
-  if (warnMissingIcons && isDevelopment() && !isExistingIconId(id)) {
+  if (isDevelopment() && !isExistingIconId(id)) {
     console.warn(`The icon "${id}" is missing from the SVG subset.`); // eslint-disable-line no-console
   }
 }
 
-function handleIconId(icon) {
+function handleIconId(icon, params) {
   let id = icon.replacementId || icon.id || "";
 
   // TODO: clean up "thumbtack unpinned" at source instead of here
   id = id.replace(" unpinned", "");
 
-  warnIfMissing(id);
+  if (!params.ignoreMissing) {
+    warnIfMissing(id);
+  }
+
   return id;
 }
 
@@ -164,7 +152,7 @@ registerIconRenderer({
   name: "font-awesome",
 
   string(icon, params) {
-    const id = escape(handleIconId(icon));
+    const id = escape(handleIconId(icon, params));
     let html = `<svg class='${escape(iconClasses(icon, params))} svg-string' width='1em' height='1em'`;
 
     if (params["aria-label"]) {
@@ -185,7 +173,6 @@ registerIconRenderer({
     if (params.translatedtitle) {
       deprecated(`use 'translatedTitle' option instead of 'translatedtitle'`, {
         since: "2.9.0.beta6",
-        dropFrom: "2.10.0.beta1",
         id: "discourse.icon-renderer-translatedtitle",
       });
       params.translatedTitle = params.translatedtitle;
@@ -200,7 +187,7 @@ registerIconRenderer({
   },
 
   element(icon, params) {
-    const id = escape(handleIconId(icon));
+    const id = escape(handleIconId(icon, params));
     const classes = iconClasses(icon, params) + " svg-node";
 
     const svgElement = document.createElementNS(SVG_NAMESPACE, "svg");

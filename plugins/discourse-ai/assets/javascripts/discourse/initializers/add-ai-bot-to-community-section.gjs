@@ -17,7 +17,7 @@ export default {
     }
 
     const availableBots = currentUser.ai_enabled_chat_bots.filter(
-      (bot) => !bot.is_persona || bot.has_default_llm
+      (bot) => !bot.is_agent || bot.has_default_llm
     );
 
     if (availableBots.length === 0) {
@@ -31,7 +31,7 @@ export default {
           route = "discourse-ai-bot-conversations";
           text = i18n("discourse_ai.ai_bot.shortcut_link");
           title = i18n("discourse_ai.ai_bot.shortcut_title");
-          defaultPrefixValue = "robot";
+          defaultPrefixValue = "discobot";
         };
       });
     });

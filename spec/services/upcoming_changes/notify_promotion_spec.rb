@@ -13,6 +13,7 @@ RSpec.describe UpcomingChanges::NotifyPromotion do
           setting_name:,
           admin_user_ids:,
           changes_already_notified_about_promotion:,
+          changes_already_promoted:,
         },
         guardian: Discourse.system_user.guardian,
       )
@@ -24,9 +25,12 @@ RSpec.describe UpcomingChanges::NotifyPromotion do
     let(:setting_name) { :enable_upload_debug_mode }
     let(:admin_user_ids) { [admin.id, admin_2.id] }
     let(:changes_already_notified_about_promotion) { [] }
+    let(:changes_already_promoted) { [] }
     let(:setting_status) { :stable }
 
     before do
+      # No upcoming change notifications are sent for new sites
+      UpcomingChanges.stubs(:should_notify_admins?).returns(true)
       SiteSetting.promote_upcoming_changes_on_status = :stable
       mock_upcoming_change_metadata(
         enable_upload_debug_mode: {
@@ -56,10 +60,123 @@ RSpec.describe UpcomingChanges::NotifyPromotion do
       it { is_expected.to fail_a_policy(:meets_or_exceeds_status) }
     end
 
-    context "when change has already been notified about promotion" do
+    context "when the change is owned by a plugin that is not configurable" do
+      let(:setting_name) { :enable_experimental_sample_plugin_feature }
+
+      before do
+        SiteSetting::SAMPLE_TEST_PLUGIN.stubs(:configurable?).returns(false)
+        mock_upcoming_change_metadata(
+          enable_experimental_sample_plugin_feature: {
+            impact: "feature,admins",
+            status: :stable,
+          },
+        )
+      end
+
+      it { is_expected.to fail_a_policy(:change_should_be_displayed) }
+
+      it "does not fire the upcoming_change_enabled event" do
+        events = DiscourseEvent.track_events(:upcoming_change_enabled) { result }
+
+        expect(events).to be_empty
+      end
+    end
+
+    context "when the change should not be displayed on this site" do
+      before do
+        UpcomingChanges::ConditionalDisplay.stubs(
+          :should_display_enable_upload_debug_mode?,
+        ).returns(false)
+      end
+
+      it { is_expected.to fail_a_policy(:change_should_be_displayed) }
+
+      it "does not notify admins or create an event" do
+        expect { result }.to not_change {
+          Notification.where(
+            notification_type: Notification.types[:upcoming_change_automatically_promoted],
+          ).count
+        }.and not_change {
+                UpcomingChangeEvent.where(
+                  event_type: :admins_notified_automatic_promotion,
+                  upcoming_change_name: :enable_upload_debug_mode,
+                ).count
+              }
+      end
+    end
+
+    context "when the change dependencies are not met" do
+      let(:setting_name) { :set_locale_from_cookie }
+
+      before do
+        SiteSetting.allow_user_locale = false
+        mock_upcoming_change_metadata(
+          set_locale_from_cookie: {
+            impact: "feature,all_members",
+            status: :stable,
+          },
+        )
+      end
+
+      it { is_expected.to fail_a_policy(:change_dependencies_met) }
+
+      it "does not notify admins, record a promotion, or trigger an enabled event" do
+        events = nil
+
+        expect {
+          events = DiscourseEvent.track_events(:upcoming_change_enabled) { result }
+        }.to not_change { Notification.count }.and(not_change { UpcomingChangeEvent.count }).and(
+          not_change { UserHistory.count },
+        )
+
+        expect(events).to be_empty
+      end
+    end
+
+    context "when the change has already been promoted" do
+      let(:changes_already_promoted) { [:enable_upload_debug_mode] }
+
+      it { is_expected.to fail_a_policy(:promotion_not_already_handled) }
+    end
+
+    context "when the change has already been notified about, but not yet promoted" do
       let(:changes_already_notified_about_promotion) { [:enable_upload_debug_mode] }
 
-      it { is_expected.to fail_a_policy(:change_has_not_already_been_notified_about_promotion) }
+      it { is_expected.to run_successfully }
+
+      it "does not notify admins" do
+        expect { result }.not_to change {
+          Notification.where(
+            notification_type: Notification.types[:upcoming_change_automatically_promoted],
+          ).count
+        }
+      end
+
+      it "does not record that admins were notified" do
+        expect { result }.not_to change {
+          UpcomingChangeEvent.where(
+            event_type: :admins_notified_automatic_promotion,
+            upcoming_change_name: :enable_upload_debug_mode,
+          ).count
+        }
+      end
+
+      it "still promotes the change for real" do
+        events = DiscourseEvent.track_events { result }
+
+        expect(
+          events.select do |e|
+            e[:event_name] == :upcoming_change_enabled &&
+              e[:params].first == :enable_upload_debug_mode
+          end,
+        ).to be_present
+        expect(
+          UpcomingChangeEvent.exists?(
+            event_type: :automatically_promoted,
+            upcoming_change_name: :enable_upload_debug_mode,
+          ),
+        ).to eq(true)
+      end
     end
 
     context "when admin has manually opted out" do
@@ -72,6 +189,12 @@ RSpec.describe UpcomingChanges::NotifyPromotion do
       before { SiteSetting.enable_upload_debug_mode = true }
 
       it { is_expected.to fail_a_policy(:admin_has_not_manually_toggled) }
+    end
+
+    context "when the site is new (< 1 hour old)" do
+      before { UpcomingChanges.stubs(:should_notify_admins?).returns(false) }
+
+      it { is_expected.to fail_a_policy(:should_notify_admins) }
     end
 
     context "when everything's ok" do
@@ -116,12 +239,10 @@ RSpec.describe UpcomingChanges::NotifyPromotion do
             .count
         }.by(2)
 
-        expect(notification.data).to eq(
-          {
-            upcoming_change_name: :enable_upload_debug_mode,
-            upcoming_change_humanized_name: "Enable upload debug mode",
-          }.to_json,
-        )
+        data = JSON.parse(notification.data)
+        expect(data["upcoming_change_names"]).to eq(["enable_upload_debug_mode"])
+        expect(data["upcoming_change_humanized_names"]).to eq(["Enable upload debug mode"])
+        expect(data["count"]).to eq(1)
       end
 
       it "creates an admins_notified_automatic_promotion event" do
@@ -133,8 +254,204 @@ RSpec.describe UpcomingChanges::NotifyPromotion do
         }.by(1)
       end
 
+      it "creates an automatically_promoted event recording the promotion" do
+        expect { result }.to change {
+          UpcomingChangeEvent.where(
+            event_type: :automatically_promoted,
+            upcoming_change_name: :enable_upload_debug_mode,
+          ).count
+        }.by(1)
+      end
+
+      it "does not create a duplicate automatically_promoted event when one already exists" do
+        UpcomingChangeEvent.create!(
+          event_type: :automatically_promoted,
+          upcoming_change_name: :enable_upload_debug_mode,
+        )
+
+        expect { result }.not_to change {
+          UpcomingChangeEvent.where(
+            event_type: :automatically_promoted,
+            upcoming_change_name: :enable_upload_debug_mode,
+          ).count
+        }
+      end
+
       it "triggers DiscourseEvent for the promoted setting" do
         expect(event[:params]).to eq([:enable_upload_debug_mode])
+      end
+
+      context "when there is an existing unread notification" do
+        before do
+          Fabricate(
+            :notification,
+            user: admin,
+            notification_type: Notification.types[:upcoming_change_automatically_promoted],
+            read: false,
+            data: {
+              upcoming_change_names: ["other_change"],
+              upcoming_change_humanized_names: ["Other change"],
+              count: 1,
+            }.to_json,
+          )
+        end
+
+        it "skips sending email when consolidating notifications" do
+          allow(Notification::Action::BulkCreate).to receive(:call).and_call_original
+
+          result
+
+          expect(Notification::Action::BulkCreate).to have_received(:call).with(
+            satisfy { |args| args[:skip_send_email] == true },
+          )
+        end
+
+        it "consolidates into a single notification per admin" do
+          result
+
+          notifications =
+            Notification.where(
+              notification_type: Notification.types[:upcoming_change_automatically_promoted],
+              user_id: admin.id,
+            )
+          expect(notifications.count).to eq(1)
+
+          data = JSON.parse(notifications.first.data)
+          expect(data["upcoming_change_names"]).to contain_exactly(
+            "other_change",
+            "enable_upload_debug_mode",
+          )
+          expect(data["count"]).to eq(2)
+        end
+      end
+
+      context "when there is an existing read notification" do
+        before do
+          Fabricate(
+            :notification,
+            user: admin,
+            notification_type: Notification.types[:upcoming_change_automatically_promoted],
+            read: true,
+            data: {
+              upcoming_change_names: ["other_change"],
+              upcoming_change_humanized_names: ["Other change"],
+              count: 1,
+            }.to_json,
+          )
+        end
+
+        it "does not skip sending email when not consolidating notifications" do
+          allow(Notification::Action::BulkCreate).to receive(:call).and_call_original
+
+          result
+
+          expect(Notification::Action::BulkCreate).to have_received(:call).with(
+            satisfy { |args| args[:skip_send_email] == false },
+          )
+        end
+
+        it "does not consolidate with the read notification" do
+          result
+
+          notifications =
+            Notification.where(
+              notification_type: Notification.types[:upcoming_change_automatically_promoted],
+              user_id: admin.id,
+            )
+          expect(notifications.count).to eq(2)
+        end
+      end
+
+      context "when the same change is already in an unread notification" do
+        before do
+          Fabricate(
+            :notification,
+            user: admin,
+            notification_type: Notification.types[:upcoming_change_automatically_promoted],
+            read: false,
+            data: {
+              upcoming_change_names: ["enable_upload_debug_mode"],
+              upcoming_change_humanized_names: ["Enable upload debug mode"],
+              count: 1,
+            }.to_json,
+          )
+        end
+
+        it "deduplicates the change names" do
+          result
+
+          notifications =
+            Notification.where(
+              notification_type: Notification.types[:upcoming_change_automatically_promoted],
+              user_id: admin.id,
+            )
+          expect(notifications.count).to eq(1)
+
+          data = JSON.parse(notifications.first.data)
+          expect(data["upcoming_change_names"]).to eq(["enable_upload_debug_mode"])
+          expect(data["count"]).to eq(1)
+        end
+      end
+
+      context "when the notification creation fails" do
+        before do
+          Notification::Action::BulkCreate.stubs(:call).raises(ActiveRecord::StatementInvalid.new)
+        end
+
+        it "rolls back the staff action log" do
+          expect { result }.not_to change {
+            UserHistory.where(
+              action: UserHistory.actions[:upcoming_change_toggled],
+              subject: "enable_upload_debug_mode",
+            ).count
+          }
+        end
+
+        it "rolls back the upcoming change event" do
+          expect { result }.not_to change {
+            UpcomingChangeEvent.where(
+              event_type: :admins_notified_automatic_promotion,
+              upcoming_change_name: :enable_upload_debug_mode,
+            ).count
+          }
+        end
+
+        it "fails the service" do
+          expect(result).to fail_with_exception
+        end
+      end
+
+      context "when there is an existing notification with the old data format" do
+        before do
+          Fabricate(
+            :notification,
+            user: admin,
+            notification_type: Notification.types[:upcoming_change_automatically_promoted],
+            read: false,
+            data: {
+              upcoming_change_name: "other_change",
+              upcoming_change_humanized_name: "Other change",
+            }.to_json,
+          )
+        end
+
+        it "merges old format into the new array format" do
+          result
+
+          notifications =
+            Notification.where(
+              notification_type: Notification.types[:upcoming_change_automatically_promoted],
+              user_id: admin.id,
+            )
+          expect(notifications.count).to eq(1)
+
+          data = JSON.parse(notifications.first.data)
+          expect(data["upcoming_change_names"]).to contain_exactly(
+            "other_change",
+            "enable_upload_debug_mode",
+          )
+          expect(data["count"]).to eq(2)
+        end
       end
     end
   end

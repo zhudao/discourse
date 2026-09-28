@@ -27,7 +27,7 @@ module DiscourseAi
       end
 
       def initialize(
-        persona:,
+        agent:,
         user:,
         topic:,
         query:,
@@ -37,7 +37,7 @@ module DiscourseAi
         resume_token:,
         tool_results:
       )
-        @persona = persona
+        @agent = agent
         @user = user
         @topic = topic
         @query = query
@@ -48,6 +48,9 @@ module DiscourseAi
         @tool_results = Array(tool_results).map(&:stringify_keys)
         @accumulated_reply = +""
         @round_count = 0
+        @accumulated_tokens = 0
+        @accumulated_request_tokens = 0
+        @accumulated_response_tokens = 0
       end
 
       def run(&event_blk)
@@ -60,7 +63,7 @@ module DiscourseAi
 
         event_blk.call(
           :context,
-          { topic_id: @topic.id, bot_user_id: @reply_user.id, persona_id: @persona.id },
+          { topic_id: @topic.id, bot_user_id: @reply_user.id, agent_id: @agent.id },
         )
 
         run_single_completion_round!(&event_blk)
@@ -86,44 +89,53 @@ module DiscourseAi
         else
           post_params[:title] = I18n.t("discourse_ai.ai_bot.default_pm_prefix")
           post_params[:archetype] = Archetype.private_message
-          post_params[:target_usernames] = "#{@user.username},#{@persona.user.username}"
+          post_params[:target_usernames] = "#{@user.username},#{@agent.user.username}"
         end
 
         @source_post = PostCreator.create!(@user, post_params)
         @topic = @source_post.topic
         @source_post_number = @source_post.post_number
 
-        persona_class = DiscourseAi::Personas::Persona.find_by(id: @persona.id, user: @current_user)
-        raise ProtocolError, I18n.t("discourse_ai.errors.persona_not_found") if persona_class.nil?
+        agent_class = DiscourseAi::Agents::Agent.find_by(id: @agent.id, user: @current_user)
+        raise ProtocolError, I18n.t("discourse_ai.errors.agent_not_found") if agent_class.nil?
 
-        @bot = DiscourseAi::Personas::Bot.as(@persona.user, persona: persona_class.new)
+        @bot = DiscourseAi::Agents::Bot.as(@agent.user, agent: agent_class.new)
         @reply_user = @bot.bot_user
         @llm_model_id = @bot.model.id
 
-        max_context_posts = @bot.persona.class.max_context_posts || 40
+        context_llm = @bot.llm
         context =
-          DiscourseAi::Personas::BotContext.new(
+          DiscourseAi::Agents::BotContext.new(
             post: @source_post,
             user: @user,
             custom_instructions: @custom_instructions,
+            server_owned_tools: false,
             messages:
               DiscourseAi::Completions::PromptMessagesBuilder.messages_from_post(
                 @source_post,
-                max_posts: max_context_posts,
-                include_uploads: @bot.persona.class.vision_enabled,
+                max_posts: DiscourseAi::Completions::PromptMessagesBuilder::MAX_CONTEXT_MESSAGES,
+                context_token_budget:
+                  DiscourseAi::Agents::Bot.context_token_budget(
+                    context_llm,
+                    @bot.agent.class.max_turn_tokens,
+                  ),
+                tokenizer: context_llm.tokenizer,
+                include_image_uploads: @bot.agent.class.vision_enabled && @bot.model.native_vision?,
+                include_document_uploads: @bot.model.allowed_attachment_types.present?,
+                allowed_attachment_types: @bot.model.allowed_attachment_types,
                 bot_usernames: available_bot_usernames,
               ),
           )
 
-        @prompt = @bot.persona.craft_prompt(context, llm: @bot.llm)
-        # This endpoint supports caller-owned tool execution. We replace persona tools so every
+        @prompt = @bot.agent.craft_prompt(context, llm: context_llm)
+        # This endpoint supports caller-owned tool execution. We replace agent tools so every
         # emitted tool call can be completed through the resume protocol.
         @prompt.tools =
           @custom_tools.map do |tool|
             DiscourseAi::Completions::ToolDefinition.from_hash(tool.deep_symbolize_keys)
           end
-        @temperature = @bot.persona.temperature
-        @top_p = @bot.persona.top_p
+        @temperature = @bot.agent.temperature
+        @top_p = @bot.agent.top_p
       end
 
       def load_resume_state!
@@ -138,7 +150,7 @@ module DiscourseAi
           raise ResumeTokenNotFound, I18n.t("discourse_ai.errors.invalid_stream_resume_token")
         end
 
-        @persona = AiPersona.find(payload["persona_id"])
+        @agent = AiAgent.find(payload["agent_id"])
         @user = User.find(payload["user_id"])
         @topic = Topic.find(payload["topic_id"])
         @reply_user = User.find(payload["reply_user_id"])
@@ -149,6 +161,16 @@ module DiscourseAi
         @accumulated_reply = payload["accumulated_reply"].to_s
         @expected_tool_calls = payload["expected_tool_calls"] || []
         @round_count = payload["round_count"].to_i
+        @accumulated_tokens = payload["accumulated_tokens"].to_i
+        request_tokens = payload["accumulated_request_tokens"]
+        response_tokens = payload["accumulated_response_tokens"]
+        if request_tokens.nil? || response_tokens.nil?
+          @accumulated_request_tokens = @accumulated_tokens / 2
+          @accumulated_response_tokens = @accumulated_tokens - @accumulated_request_tokens
+        else
+          @accumulated_request_tokens = request_tokens.to_i
+          @accumulated_response_tokens = response_tokens.to_i
+        end
 
         @prompt = prompt_from_payload(payload.fetch("prompt"))
       rescue ActiveRecord::RecordNotFound
@@ -160,8 +182,45 @@ module DiscourseAi
         turn_reply = +""
         streamed_tool_calls = []
 
+        token_budget =
+          resolve_token_budget.presence || DiscourseAi::Agents::Bot.default_max_turn_tokens(llm)
+        token_usage_tracker =
+          DiscourseAi::Completions::TokenUsageTracker.new(
+            base_request: @accumulated_request_tokens,
+            base_response: @accumulated_response_tokens,
+          )
+        execution_context =
+          DiscourseAi::Completions::ExecutionContext.new(token_usage_tracker: token_usage_tracker)
+        generate_options = {
+          user: @user,
+          temperature: @temperature,
+          top_p: @top_p,
+          execution_context: execution_context,
+          feature_name: "bot",
+        }
+
+        # Pre-check: if budget is already exhausted on resume, force one final
+        # text-only call instead of starting another tool round.
+        if @accumulated_tokens >= token_budget
+          DiscourseAi::Agents::Bot.inject_token_budget_final_answer_hint(@prompt)
+          @prompt.tool_choice = :none
+
+          final_reply = +""
+          llm.generate(@prompt, **generate_options) do |partial|
+            if partial.is_a?(String) && !partial.empty?
+              final_reply << partial
+              yield(:partial, partial)
+            end
+          end
+          @accumulated_reply << final_reply
+
+          persist_reply_post!
+          clear_resume_state!
+          return
+        end
+
         result =
-          llm.generate(@prompt, user: @user, temperature: @temperature, top_p: @top_p) do |partial|
+          llm.generate(@prompt, **generate_options) do |partial|
             if partial.is_a?(String)
               next if partial.empty?
 
@@ -175,6 +234,10 @@ module DiscourseAi
         @accumulated_reply << turn_reply
         normalized_result = normalize_result(result)
         tool_calls = unique_tool_calls(streamed_tool_calls + extract_tool_calls(normalized_result))
+
+        @accumulated_request_tokens = token_usage_tracker.request
+        @accumulated_response_tokens = token_usage_tracker.response
+        @accumulated_tokens = token_usage_tracker.total
 
         if tool_calls.present?
           non_tool_result =
@@ -194,6 +257,43 @@ module DiscourseAi
         end
 
         if tool_calls.present?
+          if @accumulated_tokens >= token_budget
+            # Budget exhausted — can't hand tools to client. Push synthetic
+            # "not executed" results and give the model one final text-only call.
+            tool_calls.each do |call|
+              @prompt.push(
+                type: :tool_call,
+                id: call.id,
+                name: call.name,
+                content: { arguments: call.parameters }.to_json,
+                provider_data: call.provider_data,
+              )
+              @prompt.push(
+                type: :tool,
+                id: call.id,
+                name: call.name,
+                content: { error: "Not executed — token budget exhausted." }.to_json,
+                provider_data: call.provider_data,
+              )
+            end
+
+            DiscourseAi::Agents::Bot.inject_token_budget_final_answer_hint(@prompt)
+            @prompt.tool_choice = :none
+
+            final_reply = +""
+            llm.generate(@prompt, **generate_options) do |partial|
+              if partial.is_a?(String) && !partial.empty?
+                final_reply << partial
+                yield(:partial, partial)
+              end
+            end
+            @accumulated_reply << final_reply
+
+            persist_reply_post!
+            clear_resume_state!
+            return
+          end
+
           token = persist_state!(tool_calls: tool_calls)
           yield(
             :tool_calls,
@@ -283,14 +383,21 @@ module DiscourseAi
 
           content = content.to_json if !content.is_a?(String)
 
+          provider_data = deep_symbolize(tool_call["provider_data"])
           @prompt.push(
             type: :tool_call,
             id: id,
             name: tool_call["name"],
             content: { arguments: tool_call["parameters"] || {} }.to_json,
-            provider_data: tool_call["provider_data"],
+            provider_data: provider_data,
           )
-          @prompt.push(type: :tool, id: id, name: tool_call["name"], content: content)
+          @prompt.push(
+            type: :tool,
+            id: id,
+            name: tool_call["name"],
+            content: content,
+            provider_data: provider_data,
+          )
         end
       end
 
@@ -308,7 +415,7 @@ module DiscourseAi
         payload = {
           version: 1,
           current_user_id: @current_user&.id,
-          persona_id: @persona.id,
+          agent_id: @agent.id,
           user_id: @user.id,
           topic_id: @topic.id,
           reply_user_id: @reply_user.id,
@@ -324,6 +431,9 @@ module DiscourseAi
           temperature: @temperature,
           top_p: @top_p,
           round_count: next_round_count,
+          accumulated_tokens: @accumulated_tokens,
+          accumulated_request_tokens: @accumulated_request_tokens,
+          accumulated_response_tokens: @accumulated_response_tokens,
         }
 
         payload_json = payload.to_json
@@ -392,12 +502,25 @@ module DiscourseAi
 
       def available_bot_usernames
         @available_bot_usernames ||=
-          AiPersona.joins(:user).pluck(:username).concat(available_bot_users.map(&:username))
+          AiAgent.joins(:user).pluck(:username).concat(available_bot_users.map(&:username))
       end
 
       def available_bot_users
         @available_bot_users ||=
           User.joins("INNER JOIN llm_models llm ON llm.user_id = users.id").where(active: true)
+      end
+
+      def resolve_agent_record
+        @_agent_record ||=
+          if @agent.is_a?(AiAgent)
+            @agent
+          else
+            AiAgent.find_by(id: @agent.id)
+          end
+      end
+
+      def resolve_token_budget
+        resolve_agent_record&.max_turn_tokens
       end
 
       def persist_reply_post!
@@ -412,25 +535,15 @@ module DiscourseAi
             custom_fields: {
               DiscourseAi::AiBot::POST_AI_LLM_NAME_FIELD => llm_model.display_name,
               DiscourseAi::AiBot::POST_AI_LLM_MODEL_ID_FIELD => @llm_model_id,
-              DiscourseAi::AiBot::POST_AI_PERSONA_ID_FIELD => @persona.id,
+              DiscourseAi::AiBot::POST_AI_AGENT_ID_FIELD => @agent.id,
             },
           )
 
         if @source_post_number == 1 && @topic.private_message?
-          persona_class =
-            DiscourseAi::Personas::Persona.find_by(id: @persona.id, user: @current_user)
-          if persona_class
-            bot =
-              DiscourseAi::Personas::Bot.as(
-                @reply_user,
-                persona: persona_class.new,
-                model: llm_model,
-              )
-            begin
-              DiscourseAi::AiBot::Playground.new(bot).title_playground(reply_post, @user)
-            rescue StandardError => e
-              Discourse.warn_exception(e, message: "Discourse AI: Unable to generate stream title")
-            end
+          agent_class = DiscourseAi::Agents::Agent.find_by(id: @agent.id, user: @current_user)
+          if agent_class
+            bot = DiscourseAi::Agents::Bot.as(@reply_user, agent: agent_class.new, model: llm_model)
+            DiscourseAi::AiBot::Playground.new(bot).title_playground(reply_post, @user)
           end
         end
       end

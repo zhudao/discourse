@@ -1,13 +1,9 @@
 import { computed } from "@ember/object";
 import AdminUser from "discourse/admin/models/admin-user";
 import { ajax } from "discourse/lib/ajax";
-import { fmt } from "discourse/lib/computed";
-import discourseComputed from "discourse/lib/decorators";
 import RestModel from "discourse/models/rest";
 
 export default class ApiKey extends RestModel {
-  @fmt("truncated_key", "%@ ...") truncatedKey;
-
   @computed("_user")
   get user() {
     return this._user;
@@ -21,9 +17,29 @@ export default class ApiKey extends RestModel {
     }
   }
 
+  @computed("truncated_key")
+  get truncatedKey() {
+    return `${this.truncated_key} ...`;
+  }
+
   @computed("_created_by")
   get createdBy() {
     return this._created_by;
+  }
+
+  @computed("description")
+  get shortDescription() {
+    if (!this.description || this.description.length < 40) {
+      return this.description;
+    }
+    return `${this.description.substring(0, 40)}...`;
+  }
+
+  @computed()
+  get basePath() {
+    return this.store
+      .adapterFor("api-key")
+      .pathFor(this.store, "api-key", this.id);
   }
 
   set created_by(value) {
@@ -32,14 +48,6 @@ export default class ApiKey extends RestModel {
     } else {
       this.set("_created_by", value);
     }
-  }
-
-  @discourseComputed("description")
-  shortDescription(description) {
-    if (!description || description.length < 40) {
-      return description;
-    }
-    return `${description.substring(0, 40)}...`;
   }
 
   revoke() {
@@ -61,12 +69,5 @@ export default class ApiKey extends RestModel {
       "scopes",
       "scope_mode"
     );
-  }
-
-  @discourseComputed()
-  basePath() {
-    return this.store
-      .adapterFor("api-key")
-      .pathFor(this.store, "api-key", this.id);
   }
 }

@@ -11,8 +11,11 @@ import Collection from "../lib/collection";
  * @implements {@ember/service}
  */
 export default class ChatApi extends Service {
-  @service chat;
   @service chatChannelsManager;
+
+  get #basePath() {
+    return "/chat/api";
+  }
 
   channel(channelId) {
     return this.#getRequest(`/channels/${channelId}`);
@@ -442,17 +445,9 @@ export default class ChatApi extends Service {
         data,
       },
       ignoreUnsent: false,
-    })
-      .then(() => {
-        this.chat.markNetworkAsReliable();
-      })
-      .catch((error) => {
-        // we ignore a draft which can't be saved because it's too big
-        // and only deal with network error for now
-        if (!error.jqXHR?.responseJSON?.errors?.length) {
-          this.chat.markNetworkAsUnreliable();
-        }
-      });
+    }).catch(() => {
+      // we ignore a draft which can't be saved because it's too big
+    });
   }
 
   /**
@@ -470,6 +465,13 @@ export default class ChatApi extends Service {
         react_action: reactAction,
         emoji,
       },
+    });
+  }
+
+  messageReactionsUsers(channelId, messageId, { page = 0, limit, emoji } = {}) {
+    return ajax(`/chat/${channelId}/${messageId}/reactions-users`, {
+      type: "GET",
+      data: { page, limit, emoji },
     });
   }
 
@@ -661,10 +663,6 @@ export default class ChatApi extends Service {
 
   markPinsAsRead(channelId) {
     return this.#putRequest(`/channels/${channelId}/pins/read`);
-  }
-
-  get #basePath() {
-    return "/chat/api";
   }
 
   #getRequest(endpoint, data = {}) {

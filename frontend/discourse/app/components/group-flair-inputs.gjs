@@ -1,88 +1,54 @@
-/* eslint-disable ember/no-classic-components, ember/no-jquery, ember/no-observers */
+/* eslint-disable ember/no-classic-components */
 import Component from "@ember/component";
-import { fn, hash } from "@ember/helper";
-import { action } from "@ember/object";
+import { fn } from "@ember/helper";
+import { action, computed } from "@ember/object";
 import { tagName } from "@ember-decorators/component";
-import { observes, on } from "@ember-decorators/object";
-import $ from "jquery";
-import AvatarFlair from "discourse/components/avatar-flair";
-import RadioButton from "discourse/components/radio-button";
-import TextField from "discourse/components/text-field";
+import { on } from "@ember-decorators/object";
 import UppyImageUploader from "discourse/components/uppy-image-uploader";
-import { ajax } from "discourse/lib/ajax";
-import discourseDebounce from "discourse/lib/debounce";
-import discourseComputed from "discourse/lib/decorators";
 import getURL from "discourse/lib/get-url";
 import { convertIconClass } from "discourse/lib/icon-library";
-import IconPicker from "discourse/select-kit/components/icon-picker";
+import { ensureSpriteSymbol } from "discourse/lib/svg-sprite-loader";
 import { or } from "discourse/truth-helpers";
+import DAvatarFlair from "discourse/ui-kit/d-avatar-flair";
+import DIconGridPicker from "discourse/ui-kit/d-icon-grid-picker";
+import DRadioButton from "discourse/ui-kit/d-radio-button";
+import DTextField from "discourse/ui-kit/d-text-field";
 import { i18n } from "discourse-i18n";
 
 @tagName("")
 export default class GroupFlairInputs extends Component {
-  @discourseComputed
-  demoAvatarUrl() {
+  @computed
+  get demoAvatarUrl() {
     return getURL("/images/avatar.png");
   }
 
-  @discourseComputed("model.flair_type")
-  flairPreviewIcon(flairType) {
-    return flairType && flairType === "icon";
+  @computed("model.flair_type")
+  get flairPreviewIcon() {
+    return this.model?.flair_type && this.model?.flair_type === "icon";
   }
 
-  @discourseComputed("model.flair_icon")
-  flairPreviewIconUrl(flairIcon) {
-    return flairIcon ? convertIconClass(flairIcon) : "";
+  @computed("model.flair_icon")
+  get flairPreviewIconUrl() {
+    return this.model?.flair_icon
+      ? convertIconClass(this.model?.flair_icon)
+      : "";
   }
 
-  @on("didInsertElement")
-  @observes("model.flair_icon")
-  _loadSVGIcon(flairIcon) {
-    if (flairIcon) {
-      discourseDebounce(this, this._loadIcon, 1000);
-    }
+  @computed("model.flair_type")
+  get flairPreviewImage() {
+    return this.model?.flair_type && this.model?.flair_type === "image";
   }
 
-  _loadIcon() {
-    if (!this.model.flair_icon) {
-      return;
-    }
-
-    const icon = convertIconClass(this.model.flair_icon),
-      c = "#svg-sprites",
-      h = "ajax-icon-holder",
-      singleIconEl = `${c} .${h}`;
-
-    if (!icon) {
-      return;
-    }
-
-    if (!$(`${c} symbol#${icon}`).length) {
-      ajax(`/svg-sprite/search/${icon}`).then(function (data) {
-        if ($(singleIconEl).length === 0) {
-          $(c).append(`<div class="${h}">`);
-        }
-
-        $(singleIconEl).html(
-          `<svg xmlns='http://www.w3.org/2000/svg' style='display: none;'>${data}</svg>`
-        );
-      });
-    }
+  @computed("model.flair_url")
+  get flairImageUrl() {
+    return this.model?.flair_url && this.model?.flair_url?.includes("/")
+      ? this.model?.flair_url
+      : null;
   }
 
-  @discourseComputed("model.flair_type")
-  flairPreviewImage(flairType) {
-    return flairType && flairType === "image";
-  }
-
-  @discourseComputed("model.flair_url")
-  flairImageUrl(flairUrl) {
-    return flairUrl && flairUrl.includes("/") ? flairUrl : null;
-  }
-
-  @discourseComputed("flairPreviewImage")
-  flairPreviewLabel(flairPreviewImage) {
-    const key = flairPreviewImage ? "image" : "icon";
+  @computed("flairPreviewImage")
+  get flairPreviewLabel() {
+    const key = this.flairPreviewImage ? "image" : "icon";
     return i18n(`groups.flair_preview_${key}`);
   }
 
@@ -102,6 +68,15 @@ export default class GroupFlairInputs extends Component {
     });
   }
 
+  @on("didInsertElement")
+  _loadIcon() {
+    const icon = convertIconClass(this.model.flair_icon || "");
+
+    if (icon) {
+      ensureSpriteSymbol(icon);
+    }
+  }
+
   <template>
     <div class="group-flair-inputs" ...attributes>
       <div class="control-group">
@@ -111,41 +86,42 @@ export default class GroupFlairInputs extends Component {
 
         <div class="radios">
           <label class="radio-label" for="avatar-flair-icon">
-            <RadioButton
-              @name="avatar-flair-icon"
+            <DRadioButton
               @id="avatar-flair-icon"
-              @value="icon"
+              @name="avatar-flair-icon"
               @selection={{this.model.flair_type}}
+              @value="icon"
             />
             {{i18n "groups.flair_type.icon"}}
           </label>
 
           <label class="radio-label" for="avatar-flair-image">
-            <RadioButton
-              @name="avatar-flair-image"
+            <DRadioButton
               @id="avatar-flair-image"
-              @value="image"
+              @name="avatar-flair-image"
               @selection={{this.model.flair_type}}
+              @value="image"
             />
             {{i18n "groups.flair_type.image"}}
           </label>
         </div>
 
         {{#if this.flairPreviewIcon}}
-          <IconPicker
-            @name="icon"
-            @value={{this.model.flair_icon}}
-            @options={{hash maximum=1}}
+          <DIconGridPicker
+            @label={{unless this.model.flair_icon (i18n "select_placeholder")}}
             @onChange={{fn (mut this.model.flair_icon)}}
+            @onlyAvailable={{false}}
+            @showCaret={{true}}
+            @value={{this.model.flair_icon}}
           />
         {{else if this.flairPreviewImage}}
           <UppyImageUploader
-            @imageUrl={{this.flairImageUrl}}
-            @onUploadDone={{this.setFlairImage}}
-            @onUploadDeleted={{this.removeFlairImage}}
-            @type="group_flair"
-            @id="group-flair-uploader"
             class="no-repeat contain-image"
+            @id="group-flair-uploader"
+            @imageUrl={{this.flairImageUrl}}
+            @onUploadDeleted={{this.removeFlairImage}}
+            @onUploadDone={{this.setFlairImage}}
+            @type="group_flair"
           />
           <div class="control-instructions">
             {{i18n "groups.flair_upload_description"}}
@@ -158,11 +134,11 @@ export default class GroupFlairInputs extends Component {
             "groups.flair_bg_color"
           }}</label>
 
-        <TextField
-          @name="flair_bg_color"
-          @value={{this.model.flair_bg_color}}
-          @placeholderKey="groups.flair_bg_color_placeholder"
+        <DTextField
           class="group-flair-bg-color input-xxlarge"
+          @name="flair_bg_color"
+          @placeholderKey="groups.flair_bg_color_placeholder"
+          @value={{this.model.flair_bg_color}}
         />
       </div>
 
@@ -172,11 +148,11 @@ export default class GroupFlairInputs extends Component {
               "groups.flair_color"
             }}</label>
 
-          <TextField
-            @name="flair_color"
-            @value={{this.model.flair_color}}
-            @placeholderKey="groups.flair_color_placeholder"
+          <DTextField
             class="group-flair-color input-xxlarge"
+            @name="flair_color"
+            @placeholderKey="groups.flair_color_placeholder"
+            @value={{this.model.flair_color}}
           />
         </div>
       {{/if}}
@@ -187,11 +163,11 @@ export default class GroupFlairInputs extends Component {
         <div class="avatar-flair-preview">
           <div class="avatar-wrapper">
             <img
-              width="45"
+              alt
+              class="avatar actor"
               height="45"
               src={{this.demoAvatarUrl}}
-              class="avatar actor"
-              alt
+              width="45"
             />
           </div>
 
@@ -202,15 +178,15 @@ export default class GroupFlairInputs extends Component {
               this.model.flairBackgroundHexColor
             )
           }}
-            <AvatarFlair
+            <DAvatarFlair
+              @flairBgColor={{this.model.flairBackgroundHexColor}}
+              @flairColor={{this.model.flairHexColor}}
               @flairName={{this.model.name}}
               @flairUrl={{if
                 this.flairPreviewIcon
                 this.model.flair_icon
                 (if this.flairPreviewImage this.flairImageUrl "")
               }}
-              @flairBgColor={{this.model.flairBackgroundHexColor}}
-              @flairColor={{this.model.flairHexColor}}
             />
           {{/if}}
         </div>

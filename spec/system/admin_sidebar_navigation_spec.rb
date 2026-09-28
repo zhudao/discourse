@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-describe "Admin | Sidebar Navigation", type: :system do
+describe "Admin | Sidebar Navigation" do
   UNFILTERED_LINK_COUNT = 42
 
   fab!(:admin)
@@ -66,6 +66,7 @@ describe "Admin | Sidebar Navigation", type: :system do
         I18n.t("admin_js.admin.config.site_settings.title"),
         I18n.t("js.sidebar.sections.community.links.review.content"),
         I18n.t("admin_js.admin.config.whats_new.title"),
+        I18n.t("admin_js.admin.config.upcoming_changes.title"),
       ],
     )
   end
@@ -106,6 +107,7 @@ describe "Admin | Sidebar Navigation", type: :system do
       I18n.t("admin_js.admin.config.site_settings.title"),
       I18n.t("js.sidebar.sections.community.links.review.content"),
       I18n.t("admin_js.admin.config.whats_new.title"),
+      I18n.t("admin_js.admin.config.upcoming_changes.title"),
     ]
     expect(page).to have_selector(
       ".sidebar-section-link-content-text",
@@ -141,6 +143,14 @@ describe "Admin | Sidebar Navigation", type: :system do
 
     expect(page).to have_css(
       '.sidebar-section-link-wrapper[data-list-item-name="admin_themes_and_components"] a.active',
+    )
+  end
+
+  it "highlights the 'All site settings' link on the all settings page" do
+    visit("/admin/site_settings/category/all_results")
+
+    expect(page).to have_css(
+      '.sidebar-section-link-wrapper[data-list-item-name="admin_all_site_settings"] a.active',
     )
   end
 

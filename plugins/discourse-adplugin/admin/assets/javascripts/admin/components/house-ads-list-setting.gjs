@@ -1,14 +1,16 @@
-import { action } from "@ember/object";
-import { mapBy } from "@ember/object/computed";
+import { action, computed } from "@ember/object";
 import { tagName } from "@ember-decorators/component";
-import DButton from "discourse/components/d-button";
 import { makeArray } from "discourse/lib/helpers";
+import DButton from "discourse/ui-kit/d-button";
 import HouseAdsChooser from "./house-ads-chooser";
 import HouseAdsSetting from "./house-ads-setting";
 
 @tagName("")
 export default class HouseAdsListSetting extends HouseAdsSetting {
-  @mapBy("allAds", "name") adNames;
+  @computed("allAds.@each.name")
+  get adNames() {
+    return this.allAds?.map?.((item) => item.name) ?? [];
+  }
 
   @action
   changeAdValue(value) {
@@ -20,9 +22,9 @@ export default class HouseAdsListSetting extends HouseAdsSetting {
     <div class="house-ads-setting house-ads-list-setting" ...attributes>
       <label for={{this.name}}>{{this.title}}</label>
       <HouseAdsChooser
-        @settingValue={{this.adValue}}
         @choices={{this.adNames}}
         @onChange={{this.changeAdValue}}
+        @settingValue={{this.adValue}}
       />
       <div class="setting-controls">
         {{#if this.changed}}

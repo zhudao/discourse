@@ -3,14 +3,14 @@ import { tracked } from "@glimmer/tracking";
 import { fn, hash } from "@ember/helper";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
-import { htmlSafe } from "@ember/template";
-import ConditionalLoadingSpinner from "discourse/components/conditional-loading-spinner";
-import DMultiSelect from "discourse/components/d-multi-select";
+import { trustHTML } from "@ember/template";
 import Form from "discourse/components/form";
 import { ajax } from "discourse/lib/ajax";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import getURL from "discourse/lib/get-url";
 import ComboBox from "discourse/select-kit/components/combo-box";
+import DConditionalLoadingSpinner from "discourse/ui-kit/d-conditional-loading-spinner";
+import DMultiSelect from "discourse/ui-kit/d-multi-select";
 import I18n, { i18n } from "discourse-i18n";
 
 export default class AdminWelcomeBannerForm extends Component {
@@ -184,6 +184,13 @@ export default class AdminWelcomeBannerForm extends Component {
           localeSelector: localeValue,
         };
       }
+
+      // Update originalFormData so save() correctly detects changes for the new locale
+      this.originalFormData = {
+        ...this.originalFormData,
+        ...textData,
+        localeSelector: localeValue,
+      };
     } catch (error) {
       popupAjaxError(error);
     } finally {
@@ -351,33 +358,34 @@ export default class AdminWelcomeBannerForm extends Component {
   }
 
   <template>
-    <ConditionalLoadingSpinner @condition={{this.isLoading}}>
+    <DConditionalLoadingSpinner @condition={{this.isLoading}}>
       <Form
-        @onSubmit={{this.save}}
+        class="admin-welcome-banner-form"
         @data={{this.formData}}
         @onRegisterApi={{this.registerApi}}
-        class="admin-welcome-banner-form"
+        @onSubmit={{this.save}}
         as |form|
       >
         <form.Field
-          @name="enabledThemes"
-          @title={{i18n
-            "admin.config.welcome_banner.form.enabled_themes.label"
-          }}
           @description={{i18n
             "admin.config.welcome_banner.form.enabled_themes.description"
           }}
           @format="large"
+          @name="enabledThemes"
+          @title={{i18n
+            "admin.config.welcome_banner.form.enabled_themes.label"
+          }}
+          @type="custom"
           as |field|
         >
-          <field.Custom>
+          <field.Control>
             <DMultiSelect
-              @loadFn={{this.loadThemes}}
-              @selection={{field.value}}
               @label={{i18n
                 "admin.config.welcome_banner.form.enabled_themes.select_label"
               }}
+              @loadFn={{this.loadThemes}}
               @onChange={{field.set}}
+              @selection={{field.value}}
             >
               <:selection as |theme|>
                 {{theme.name}}
@@ -386,46 +394,49 @@ export default class AdminWelcomeBannerForm extends Component {
                 {{theme.name}}
               </:result>
             </DMultiSelect>
-          </field.Custom>
+          </field.Control>
         </form.Field>
 
         <form.Field
-          @name="welcomeBannerImage"
-          @title={{i18n
-            "admin.config.welcome_banner.form.background_image.label"
-          }}
           @description={{i18n
             "admin.config.welcome_banner.form.background_image.description"
           }}
+          @name="welcomeBannerImage"
           @onSet={{fn this.handleUpload "welcomeBannerImage"}}
+          @title={{i18n
+            "admin.config.welcome_banner.form.background_image.label"
+          }}
+          @type="image"
           as |field|
         >
-          <field.Image @type="site_setting" />
+          <field.Control @type="site_setting" />
         </form.Field>
 
         <form.Field
-          @name="welcomeBannerTextColor"
-          @title={{i18n "admin.config.welcome_banner.form.text_color.label"}}
           @description={{i18n
             "admin.config.welcome_banner.form.text_color.description"
           }}
           @format="large"
+          @name="welcomeBannerTextColor"
+          @title={{i18n "admin.config.welcome_banner.form.text_color.label"}}
+          @type="color"
           as |field|
         >
-          <field.Color @allowNamedColors={{true}} />
+          <field.Control @allowNamedColors={{true}} @prefixHex={{true}} />
         </form.Field>
 
         <form.Field
+          @description={{i18n
+            "admin.config.welcome_banner.form.page_visibility.description"
+          }}
           @name="welcomeBannerPageVisibility"
           @title={{i18n
             "admin.config.welcome_banner.form.page_visibility.label"
           }}
-          @description={{i18n
-            "admin.config.welcome_banner.form.page_visibility.description"
-          }}
+          @type="select"
           as |field|
         >
-          <field.Select @includeNone={{false}} as |select|>
+          <field.Control @includeNone={{false}} as |select|>
             <select.Option @value="top_menu_pages">{{i18n
                 "admin.config.welcome_banner.form.page_visibility.options.top_menu_pages"
               }}</select.Option>
@@ -438,67 +449,70 @@ export default class AdminWelcomeBannerForm extends Component {
             <select.Option @value="all_pages">{{i18n
                 "admin.config.welcome_banner.form.page_visibility.options.all_pages"
               }}</select.Option>
-          </field.Select>
+          </field.Control>
         </form.Field>
 
         <form.Field
-          @name="welcomeBannerLocation"
-          @title={{i18n "admin.config.welcome_banner.form.location.label"}}
           @description={{i18n
             "admin.config.welcome_banner.form.location.description"
           }}
+          @name="welcomeBannerLocation"
+          @title={{i18n "admin.config.welcome_banner.form.location.label"}}
+          @type="select"
           as |field|
         >
-          <field.Select @includeNone={{false}} as |select|>
+          <field.Control @includeNone={{false}} as |select|>
             <select.Option @value="above_topic_content">{{i18n
                 "admin.config.welcome_banner.form.location.options.above_topic_content"
               }}</select.Option>
             <select.Option @value="below_site_header">{{i18n
                 "admin.config.welcome_banner.form.location.options.below_site_header"
               }}</select.Option>
-          </field.Select>
+          </field.Control>
         </form.Field>
 
         <form.Section
           @title={{i18n "admin.config.welcome_banner.form.text_section.title"}}
         >
           <form.Field
+            @format="large"
             @name="localeSelector"
             @title={{i18n
               "admin.config.welcome_banner.form.text_section.locale_label"
             }}
-            @format="large"
+            @type="custom"
             @validation="required"
             as |field|
           >
-            <field.Custom>
+            <field.Control>
               <ComboBox
-                @valueProperty="value"
+                class="translation-selector"
                 @content={{this.availableLocales}}
-                @value={{this.locale}}
                 @onChange={{this.updateLocale}}
                 @options={{hash filterable=true}}
-                class="translation-selector"
+                @value={{this.locale}}
+                @valueProperty="value"
               />
-            </field.Custom>
+            </field.Control>
           </form.Field>
 
           <form.Field
-            @name="headerNewMembers"
-            @title={{i18n
-              "admin.config.welcome_banner.form.header_new_members.label"
-            }}
-            @description={{htmlSafe
+            @description={{trustHTML
               (i18n
                 "admin.config.welcome_banner.form.header_new_members.description"
               )
             }}
-            @format="large"
-            @validation="required"
             @disabled={{this.isLoadingLocale}}
+            @format="large"
+            @name="headerNewMembers"
+            @title={{i18n
+              "admin.config.welcome_banner.form.header_new_members.label"
+            }}
+            @type="input"
+            @validation="required"
             as |field|
           >
-            <field.Input
+            <field.Control
               placeholder={{i18n
                 "admin.config.welcome_banner.form.header_new_members.placeholder"
                 site_name="%{site_name}"
@@ -508,21 +522,22 @@ export default class AdminWelcomeBannerForm extends Component {
           </form.Field>
 
           <form.Field
-            @name="headerLoggedInMembers"
-            @title={{i18n
-              "admin.config.welcome_banner.form.header_logged_in.label"
-            }}
-            @description={{htmlSafe
+            @description={{trustHTML
               (i18n
                 "admin.config.welcome_banner.form.header_logged_in.description"
               )
             }}
-            @format="large"
-            @validation="required"
             @disabled={{this.isLoadingLocale}}
+            @format="large"
+            @name="headerLoggedInMembers"
+            @title={{i18n
+              "admin.config.welcome_banner.form.header_logged_in.label"
+            }}
+            @type="input"
+            @validation="required"
             as |field|
           >
-            <field.Input
+            <field.Control
               placeholder={{i18n
                 "admin.config.welcome_banner.form.header_logged_in.placeholder"
                 site_name="%{site_name}"
@@ -532,21 +547,22 @@ export default class AdminWelcomeBannerForm extends Component {
           </form.Field>
 
           <form.Field
-            @name="headerAnonymousMembers"
-            @title={{i18n
-              "admin.config.welcome_banner.form.header_anonymous.label"
-            }}
-            @description={{htmlSafe
+            @description={{trustHTML
               (i18n
                 "admin.config.welcome_banner.form.header_anonymous.description"
               )
             }}
-            @format="large"
-            @validation="required"
             @disabled={{this.isLoadingLocale}}
+            @format="large"
+            @name="headerAnonymousMembers"
+            @title={{i18n
+              "admin.config.welcome_banner.form.header_anonymous.label"
+            }}
+            @type="input"
+            @validation="required"
             as |field|
           >
-            <field.Input
+            <field.Control
               placeholder={{i18n
                 "admin.config.welcome_banner.form.header_anonymous.placeholder"
                 site_name="%{site_name}"
@@ -555,49 +571,52 @@ export default class AdminWelcomeBannerForm extends Component {
           </form.Field>
 
           <form.Field
+            @description={{i18n
+              "admin.config.welcome_banner.form.subheader_logged_in.description"
+            }}
+            @disabled={{this.isLoadingLocale}}
+            @format="large"
             @name="subheaderLoggedInMembers"
             @title={{i18n
               "admin.config.welcome_banner.form.subheader_logged_in.label"
             }}
-            @description={{i18n
-              "admin.config.welcome_banner.form.subheader_logged_in.description"
-            }}
-            @format="large"
-            @disabled={{this.isLoadingLocale}}
+            @type="textarea"
             as |field|
           >
-            <field.Textarea />
+            <field.Control />
           </form.Field>
 
           <form.Field
+            @description={{i18n
+              "admin.config.welcome_banner.form.subheader_anonymous.description"
+            }}
+            @disabled={{this.isLoadingLocale}}
+            @format="large"
             @name="subheaderAnonymousMembers"
             @title={{i18n
               "admin.config.welcome_banner.form.subheader_anonymous.label"
             }}
-            @description={{i18n
-              "admin.config.welcome_banner.form.subheader_anonymous.description"
-            }}
-            @format="large"
-            @disabled={{this.isLoadingLocale}}
+            @type="textarea"
             as |field|
           >
-            <field.Textarea />
+            <field.Control />
           </form.Field>
 
           <form.Field
+            @description={{i18n
+              "admin.config.welcome_banner.form.search_placeholder.description"
+            }}
+            @disabled={{this.isLoadingLocale}}
+            @format="large"
             @name="searchPlaceholder"
             @title={{i18n
               "admin.config.welcome_banner.form.search_placeholder.label"
             }}
-            @description={{i18n
-              "admin.config.welcome_banner.form.search_placeholder.description"
-            }}
-            @format="large"
+            @type="input"
             @validation="required"
-            @disabled={{this.isLoadingLocale}}
             as |field|
           >
-            <field.Input
+            <field.Control
               placeholder={{i18n
                 "admin.config.welcome_banner.form.search_placeholder.placeholder"
               }}
@@ -606,6 +625,6 @@ export default class AdminWelcomeBannerForm extends Component {
         </form.Section>
         <form.Submit />
       </Form>
-    </ConditionalLoadingSpinner>
+    </DConditionalLoadingSpinner>
   </template>
 }

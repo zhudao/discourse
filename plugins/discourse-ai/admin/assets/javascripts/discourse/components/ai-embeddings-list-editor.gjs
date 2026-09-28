@@ -2,10 +2,10 @@ import Component from "@glimmer/component";
 import { concat } from "@ember/helper";
 import { service } from "@ember/service";
 import AdminConfigAreaEmptyList from "discourse/admin/components/admin-config-area-empty-list";
-import DBreadcrumbsItem from "discourse/components/d-breadcrumbs-item";
-import DButton from "discourse/components/d-button";
-import DPageSubheader from "discourse/components/d-page-subheader";
 import DTooltip from "discourse/float-kit/components/d-tooltip";
+import DBreadcrumbsItem from "discourse/ui-kit/d-breadcrumbs-item";
+import DButton from "discourse/ui-kit/d-button";
+import DPageSubheader from "discourse/ui-kit/d-page-subheader";
 import { i18n } from "discourse-i18n";
 import AiEmbeddingEditor from "./ai-embedding-editor";
 
@@ -18,34 +18,34 @@ export default class AiEmbeddingsListEditor extends Component {
 
   <template>
     <DBreadcrumbsItem
-      @path="/admin/plugins/{{this.adminPluginNavManager.currentPlugin.name}}/ai-embeddings"
       @label={{i18n "discourse_ai.embeddings.short_title"}}
+      @path="/admin/plugins/{{this.adminPluginNavManager.currentPlugin.name}}/ai-embeddings"
     />
     <section class="ai-embeddings-list-editor admin-detail">
       {{#if @currentEmbedding}}
         <AiEmbeddingEditor
-          @model={{@currentEmbedding}}
           @embeddings={{@embeddings}}
+          @model={{@currentEmbedding}}
         />
       {{else}}
         <DPageSubheader
-          @titleLabel={{i18n "discourse_ai.embeddings.short_title"}}
           @descriptionLabel={{i18n "discourse_ai.embeddings.description"}}
           @learnMoreUrl="https://meta.discourse.org/t/discourse-ai-embeddings/259603"
+          @titleLabel={{i18n "discourse_ai.embeddings.short_title"}}
         >
           <:actions as |actions|>
             <actions.Primary
+              class="ai-embeddings-list-editor__new-button"
+              @icon="plus"
               @label="discourse_ai.embeddings.new"
               @route="adminPlugins.show.discourse-ai-embeddings.new"
-              @icon="plus"
-              class="ai-embeddings-list-editor__new-button"
             />
           </:actions>
         </DPageSubheader>
 
         {{#if this.hasEmbeddingElements}}
-          <table class="d-admin-table">
-            <thead>
+          <table class="d-table">
+            <thead class="d-table__header">
               <tr>
                 <th>{{i18n "discourse_ai.embeddings.display_name"}}</th>
                 <th>{{i18n "discourse_ai.embeddings.provider"}}</th>
@@ -54,16 +54,16 @@ export default class AiEmbeddingsListEditor extends Component {
             </thead>
             <tbody>
               {{#each @embeddings.content as |embedding|}}
-                <tr class="ai-embeddings-list__row d-admin-row__content">
-                  <td class="d-admin-row__overview">
+                <tr class="ai-embeddings-list__row d-table__row">
+                  <td class="d-table__cell --overview">
                     <div class="ai-embeddings-list__name">
                       <strong>
                         {{embedding.display_name}}
                       </strong>
                     </div>
                   </td>
-                  <td class="d-admin-row__detail">
-                    <div class="d-admin-row__mobile-label">
+                  <td class="d-table__cell --detail">
+                    <div class="d-table__mobile-label">
                       {{i18n "discourse_ai.embeddings.provider"}}
                     </div>
                     {{i18n
@@ -72,7 +72,7 @@ export default class AiEmbeddingsListEditor extends Component {
                       )
                     }}
                   </td>
-                  <td class="d-admin-row__controls">
+                  <td class="d-table__cell --controls">
                     {{#if embedding.seeded}}
                       <DTooltip
                         class="ai-embeddings-list__edit-disabled-tooltip"
@@ -102,9 +102,9 @@ export default class AiEmbeddingsListEditor extends Component {
           </table>
         {{else}}
           <AdminConfigAreaEmptyList
+            @ctaClass="ai-embeddings-list-editor__empty-new-button"
             @ctaLabel="discourse_ai.embeddings.new"
             @ctaRoute="adminPlugins.show.discourse-ai-embeddings.new"
-            @ctaClass="ai-embeddings-list-editor__empty-new-button"
             @emptyLabel="discourse_ai.embeddings.empty"
           />
         {{/if}}

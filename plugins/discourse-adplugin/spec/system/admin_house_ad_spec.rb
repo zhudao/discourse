@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-describe "Admin House Ad", type: :system do
+describe "Admin House Ad" do
   fab!(:admin)
 
   let(:house_ads_page) { PageObjects::Pages::AdminHouseAds.new }
@@ -88,7 +88,7 @@ describe "Admin House Ad", type: :system do
         "tr[data-plugin-name='discourse-adplugin'] .admin-plugins-list__enabled .d-toggle-switch__checkbox-slider",
       ).click
 
-      find(".admin-plugin-tab-nav-item[data-plugin-nav-tab-id='discourse-adplugin'] a").click
+      find("tr[data-plugin-name='discourse-adplugin'] .admin-plugins-list__name").click
 
       expect(page).to have_css(".admin-plugin-config-page__top-nav-item", text: "House Ads")
     end

@@ -1,10 +1,14 @@
-import Component from "@glimmer/component";
 import { action } from "@ember/object";
 import { isBlank } from "@ember/utils";
 import UppyImageUploader from "discourse/components/uppy-image-uploader";
+import FKBaseControl from "discourse/form-kit/components/fk/control/base";
 
-export default class FKControlImage extends Component {
+export default class FKControlImage extends FKBaseControl {
   static controlType = "image";
+
+  get imageUrl() {
+    return isBlank(this.args.field.value) ? null : this.args.field.value;
+  }
 
   @action
   setImage(upload) {
@@ -13,23 +17,20 @@ export default class FKControlImage extends Component {
 
   @action
   removeImage() {
-    this.setImage(undefined);
-  }
-
-  get imageUrl() {
-    return isBlank(this.args.field.value) ? null : this.args.field.value;
+    this.setImage(null);
   }
 
   <template>
     <UppyImageUploader
+      class="form-kit__control-image no-repeat contain-image"
+      @additionalParams={{@additionalParams}}
+      @disabled={{@field.disabled}}
       @id="{{@field.id}}-{{@field.name}}"
       @imageUrl={{this.imageUrl}}
-      @onUploadDone={{this.setImage}}
       @onUploadDeleted={{this.removeImage}}
+      @onUploadDone={{this.setImage}}
+      @placeholderUrl={{@placeholderUrl}}
       @type={{@type}}
-      @disabled={{@field.disabled}}
-      @placeholderUrl={{@field.args.placeholderUrl}}
-      class="form-kit__control-image no-repeat contain-image"
     />
   </template>
 }

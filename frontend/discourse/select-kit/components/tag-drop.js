@@ -1,8 +1,6 @@
 import { action, computed } from "@ember/object";
-import { readOnly } from "@ember/object/computed";
 import { service } from "@ember/service";
 import { classNameBindings, classNames } from "@ember-decorators/component";
-import { setting } from "discourse/lib/computed";
 import { bind } from "discourse/lib/decorators";
 import { makeArray } from "discourse/lib/helpers";
 import DiscourseURL, { getCategoryAndTagUrl } from "discourse/lib/url";
@@ -39,16 +37,30 @@ const MORE_TAGS_COLLECTION = "MORE_TAGS_COLLECTION";
 export default class TagDrop extends ComboBoxComponent {
   @service tagUtils;
 
-  @readOnly("tag.name") value;
-
-  @setting("max_tag_search_results") maxTagSearchResults;
-  @setting("tags_sort_alphabetically") sortTagsAlphabetically;
-  @setting("max_tags_in_filter_list") maxTagsInFilterList;
-
   init() {
     super.init(...arguments);
 
     this.insertAfterCollection(MAIN_COLLECTION, MORE_TAGS_COLLECTION);
+  }
+
+  @computed("tag.id")
+  get value() {
+    return this.tag?.id;
+  }
+
+  @computed("siteSettings.max_tag_search_results")
+  get maxTagSearchResults() {
+    return this.siteSettings.max_tag_search_results;
+  }
+
+  @computed("siteSettings.tags_sort_alphabetically")
+  get sortTagsAlphabetically() {
+    return this.siteSettings.tags_sort_alphabetically;
+  }
+
+  @computed("siteSettings.max_tags_in_filter_list")
+  get maxTagsInFilterList() {
+    return this.siteSettings.max_tags_in_filter_list;
   }
 
   @computed("maxTagsInFilterList", "topTags.[]", "mainCollection.[]")
@@ -60,47 +72,9 @@ export default class TagDrop extends ComboBoxComponent {
     }
   }
 
-  modifyComponentForCollection(collection) {
-    if (collection === MORE_TAGS_COLLECTION) {
-      return FilterForMore;
-    }
-  }
-
-  modifyContentForCollection(collection) {
-    if (collection === MORE_TAGS_COLLECTION) {
-      return {
-        shouldShowMoreTip: this.shouldShowMoreTags,
-      };
-    }
-  }
-
-  modifyNoSelection() {
-    if (this.value === NONE_TAG) {
-      return this.defaultItem(NO_TAG_ID, i18n("tagging.selector_no_tags"));
-    } else {
-      return this.defaultItem(ALL_TAGS_ID, i18n("tagging.selector_tags"));
-    }
-  }
-
-  modifySelection(content) {
-    if (this.value === NONE_TAG) {
-      return this.defaultItem(NO_TAG_ID, i18n("tagging.selector_no_tags"));
-    }
-
-    if (this.value && this.tag?.name) {
-      return this.defaultItem(this.value, this.tag.name);
-    }
-
-    return content;
-  }
-
-  @computed("value")
+  @computed("tag.slug")
   get tagClass() {
-    return this.value ? `tag-${this.value}` : "tag_all";
-  }
-
-  modifyComponentForRow() {
-    return TagRow;
+    return this.tag?.slug ? `tag-${this.tag.slug}` : "tag_all";
   }
 
   @computed("tag.name")
@@ -151,6 +125,44 @@ export default class TagDrop extends ComboBoxComponent {
     }
   }
 
+  modifyComponentForCollection(collection) {
+    if (collection === MORE_TAGS_COLLECTION) {
+      return FilterForMore;
+    }
+  }
+
+  modifyContentForCollection(collection) {
+    if (collection === MORE_TAGS_COLLECTION) {
+      return {
+        shouldShowMoreTip: this.shouldShowMoreTags,
+      };
+    }
+  }
+
+  modifyNoSelection() {
+    if (this.tag?.name === NONE_TAG) {
+      return this.defaultItem(NO_TAG_ID, i18n("tagging.selector_no_tags"));
+    } else {
+      return this.defaultItem(ALL_TAGS_ID, i18n("tagging.selector_tags"));
+    }
+  }
+
+  modifySelection(content) {
+    if (this.tag?.name === NONE_TAG) {
+      return this.defaultItem(NO_TAG_ID, i18n("tagging.selector_no_tags"));
+    }
+
+    if (this.value && this.tag?.name) {
+      return this.defaultItem(this.value, this.tag.name);
+    }
+
+    return content;
+  }
+
+  modifyComponentForRow() {
+    return TagRow;
+  }
+
   validateCreate(filter, content) {
     return this.tagUtils.validateCreate(
       filter,
@@ -189,28 +201,6 @@ export default class TagDrop extends ComboBoxComponent {
     }
   }
 
-  @bind
-  _transformJson(json) {
-    if (this.isDestroyed || this.isDestroying) {
-      return [];
-    }
-
-    return json.results
-      .sort((a, b) => a.name > b.name)
-      .map((r) => {
-        const content = this.defaultItem(r.id, r.name);
-        content.slug = r.slug;
-        if (!this.currentCategory) {
-          content.count = r.count;
-        }
-        content.pmCount = r.pm_count;
-        if (r.target_tag) {
-          content.targetTag = r.target_tag;
-        }
-        return content;
-      });
-  }
-
   @action
   onChange(value, tag) {
     let tagArg;
@@ -228,5 +218,27 @@ export default class TagDrop extends ComboBoxComponent {
     DiscourseURL.routeToUrl(
       getCategoryAndTagUrl(this.currentCategory, !this.noSubcategories, tagArg)
     );
+  }
+
+  @bind
+  _transformJson(json) {
+    if (this.isDestroying) {
+      return [];
+    }
+
+    return json.results
+      .sort((a, b) => a.name > b.name)
+      .map((r) => {
+        const content = this.defaultItem(r.id, r.name);
+        content.slug = r.slug;
+        if (!this.currentCategory) {
+          content.count = r.count;
+        }
+        content.pmCount = r.pm_count;
+        if (r.target_tag) {
+          content.targetTag = r.target_tag;
+        }
+        return content;
+      });
   }
 }

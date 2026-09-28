@@ -8,16 +8,16 @@ import { service } from "@ember/service";
 import AdminSectionLandingItem from "discourse/admin/components/admin-section-landing-item";
 import AdminSectionLandingWrapper from "discourse/admin/components/admin-section-landing-wrapper";
 import BackButton from "discourse/components/back-button";
-import ConditionalLoadingSpinner from "discourse/components/conditional-loading-spinner";
-import DButton from "discourse/components/d-button";
 import Form from "discourse/components/form";
-import icon from "discourse/helpers/d-icon";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import {
   addUniqueValueToArray,
   removeValueFromArray,
 } from "discourse/lib/array-tools";
 import { eq, not } from "discourse/truth-helpers";
+import DButton from "discourse/ui-kit/d-button";
+import DConditionalLoadingSpinner from "discourse/ui-kit/d-conditional-loading-spinner";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
 import { i18n } from "discourse-i18n";
 import AiSecretSelector from "./ai-secret-selector";
 
@@ -133,6 +133,43 @@ export default class AiEmbeddingEditor extends Component {
     return this.args.model.id < 0;
   }
 
+  get providerParams() {
+    const normalizeParam = (value) => {
+      if (!value) {
+        return { type: "text" };
+      }
+
+      if (typeof value === "string") {
+        return { type: value };
+      }
+
+      return {
+        type: value.type || "text",
+        values: (value.values || []).map((v) => ({ id: v, name: v })),
+        default: value.default,
+      };
+    };
+
+    return Object.entries(this.metaProviderParams).reduce(
+      (acc, [field, value]) => {
+        acc[field] = normalizeParam(value);
+        return acc;
+      },
+      {}
+    );
+  }
+
+  fieldTypeForProviderParam(type) {
+    switch (type) {
+      case "enum":
+        return "select";
+      case "checkbox":
+        return "checkbox";
+      default:
+        return `input-${type}`;
+    }
+  }
+
   @action
   configurePreset(preset) {
     this.selectedPreset =
@@ -165,32 +202,6 @@ export default class AiEmbeddingEditor extends Component {
     }
 
     set("provider_params", initialParams);
-  }
-
-  get providerParams() {
-    const normalizeParam = (value) => {
-      if (!value) {
-        return { type: "text" };
-      }
-
-      if (typeof value === "string") {
-        return { type: value };
-      }
-
-      return {
-        type: value.type || "text",
-        values: (value.values || []).map((v) => ({ id: v, name: v })),
-        default: value.default,
-      };
-    };
-
-    return Object.entries(this.metaProviderParams).reduce(
-      (acc, [field, value]) => {
-        acc[field] = normalizeParam(value);
-        return acc;
-      },
-      {}
-    );
   }
 
   @action
@@ -305,21 +316,21 @@ export default class AiEmbeddingEditor extends Component {
   <template>
     {{#if this.showPresets}}
       <BackButton
-        @route="adminPlugins.show.discourse-ai-embeddings"
         @label="discourse_ai.embeddings.back"
+        @route="adminPlugins.show.discourse-ai-embeddings"
       />
       <div class="control-group">
         <h2>{{i18n "discourse_ai.embeddings.presets"}}</h2>
         <AdminSectionLandingWrapper>
           {{#each this.presets as |preset|}}
             <AdminSectionLandingItem
-              @titleLabelTranslated={{preset.name}}
+              class="ai-llms-list-editor__templates-list-item"
+              data-preset-id={{preset.id}}
               @taglineLabel={{concat
                 "discourse_ai.embeddings.providers."
                 preset.provider
               }}
-              data-preset-id={{preset.id}}
-              class="ai-llms-list-editor__templates-list-item"
+              @titleLabelTranslated={{preset.name}}
             >
               <:buttons as |buttons|>
                 <buttons.Default
@@ -334,180 +345,190 @@ export default class AiEmbeddingEditor extends Component {
       </div>
     {{else}}
       <Form
-        @onSubmit={{this.save}}
-        @data={{this.formData}}
         class="form-horizontal ai-embedding-editor {{if this.seeded 'seeded'}}"
+        @data={{this.formData}}
+        @onSubmit={{this.save}}
         as |form data|
       >
         {{#if @model.isNew}}
           <DButton
-            @action={{this.resetForm}}
-            @label="back_button"
-            @icon="chevron-left"
             class="btn-flat back-button"
+            @action={{this.resetForm}}
+            @icon="chevron-left"
+            @label="back_button"
           />
         {{else}}
           <BackButton
-            @route="adminPlugins.show.discourse-ai-embeddings"
             @label="discourse_ai.embeddings.back"
+            @route="adminPlugins.show.discourse-ai-embeddings"
           />
         {{/if}}
 
         <form.Field
+          class="ai-embedding-editor__display-name"
+          @format="large"
           @name="display_name"
           @title={{i18n "discourse_ai.embeddings.display_name"}}
+          @type="input"
           @validation="required|length:1,100"
-          @format="large"
-          class="ai-embedding-editor__display-name"
           as |field|
         >
-          <field.Input />
+          <field.Control />
         </form.Field>
 
         <form.Field
-          @name="provider"
-          @title={{i18n "discourse_ai.embeddings.provider"}}
-          @validation="required"
-          @format="large"
-          @onSet={{this.setProvider}}
           class="ai-embedding-editor__provider"
+          @format="large"
+          @name="provider"
+          @onSet={{this.setProvider}}
+          @title={{i18n "discourse_ai.embeddings.provider"}}
+          @type="select"
+          @validation="required"
           as |field|
         >
-          <field.Select as |select|>
+          <field.Control as |select|>
             {{#each this.selectedProviders as |provider|}}
               <select.Option
                 @value={{provider.id}}
               >{{provider.name}}</select.Option>
             {{/each}}
-          </field.Select>
+          </field.Control>
         </form.Field>
 
         <form.Field
+          class="ai-embedding-editor__url"
+          @format="large"
           @name="url"
           @title={{i18n "discourse_ai.embeddings.url"}}
+          @type="input"
           @validation="required"
-          @format="large"
-          class="ai-embedding-editor__url"
           as |field|
         >
-          <field.Input />
+          <field.Control />
         </form.Field>
 
         <form.Field
+          class="ai-embedding-editor__api-key"
+          @format="large"
           @name="ai_secret_id"
           @title={{i18n "discourse_ai.embeddings.api_key"}}
-          @format="large"
-          class="ai-embedding-editor__api-key"
+          @type="custom"
           as |field|
         >
-          <field.Custom>
+          <field.Control>
             <AiSecretSelector
-              @value={{data.ai_secret_id}}
-              @secrets={{this.availableSecrets}}
               @onChange={{field.set}}
+              @secrets={{this.availableSecrets}}
+              @value={{data.ai_secret_id}}
             />
-          </field.Custom>
+          </field.Control>
         </form.Field>
 
         <form.Field
+          class="ai-embedding-editor__tokenizer"
+          @format="large"
           @name="tokenizer_class"
           @title={{i18n "discourse_ai.embeddings.tokenizer"}}
+          @type="select"
           @validation="required"
-          @format="large"
-          class="ai-embedding-editor__tokenizer"
           as |field|
         >
-          <field.Select as |select|>
+          <field.Control as |select|>
             {{#each @embeddings.resultSetMeta.tokenizers as |tokenizer|}}
               <select.Option
                 @value={{tokenizer.id}}
               >{{tokenizer.name}}</select.Option>
             {{/each}}
-          </field.Select>
+          </field.Control>
         </form.Field>
 
         <form.Field
+          class="ai-embedding-editor__dimensions"
+          @format="large"
           @name="dimensions"
           @title={{i18n "discourse_ai.embeddings.dimensions"}}
-          @validation="required"
-          @format="large"
           @tooltip={{if
             @model.isNew
             (i18n "discourse_ai.embeddings.hints.dimensions_warning")
           }}
-          class="ai-embedding-editor__dimensions"
+          @type="input-number"
+          @validation="required"
           as |field|
         >
-          <field.Input
-            @type="number"
-            step="any"
-            min="0"
-            lang="en"
+          <field.Control
             disabled={{not @model.isNew}}
+            lang="en"
+            min="0"
+            step="any"
           />
         </form.Field>
 
         <form.Field
+          class="ai-embedding-editor__matryoshka_dimensions"
+          @format="large"
           @name="matryoshka_dimensions"
           @title={{i18n "discourse_ai.embeddings.matryoshka_dimensions"}}
           @tooltip={{i18n
             "discourse_ai.embeddings.hints.matryoshka_dimensions"
           }}
-          @format="large"
-          class="ai-embedding-editor__matryoshka_dimensions"
+          @type="checkbox"
           as |field|
         >
-          <field.Checkbox />
+          <field.Control />
         </form.Field>
 
         <form.Field
+          class="ai-embedding-editor__embed_prompt"
+          @format="large"
           @name="embed_prompt"
           @title={{i18n "discourse_ai.embeddings.embed_prompt"}}
           @tooltip={{i18n "discourse_ai.embeddings.hints.embed_prompt"}}
-          @format="large"
-          class="ai-embedding-editor__embed_prompt"
+          @type="textarea"
           as |field|
         >
-          <field.Textarea />
+          <field.Control />
         </form.Field>
 
         <form.Field
+          class="ai-embedding-editor__search_prompt"
+          @format="large"
           @name="search_prompt"
           @title={{i18n "discourse_ai.embeddings.search_prompt"}}
           @tooltip={{i18n "discourse_ai.embeddings.hints.search_prompt"}}
-          @format="large"
-          class="ai-embedding-editor__search_prompt"
+          @type="textarea"
           as |field|
         >
-          <field.Textarea />
+          <field.Control />
         </form.Field>
 
         <form.Field
+          class="ai-embedding-editor__max_sequence_length"
+          @format="large"
           @name="max_sequence_length"
           @title={{i18n "discourse_ai.embeddings.max_sequence_length"}}
           @tooltip={{i18n "discourse_ai.embeddings.hints.sequence_length"}}
+          @type="input-number"
           @validation="required"
-          @format="large"
-          class="ai-embedding-editor__max_sequence_length"
           as |field|
         >
-          <field.Input @type="number" step="any" min="0" lang="en" />
+          <field.Control lang="en" min="0" step="any" />
         </form.Field>
 
         <form.Field
+          class="ai-embedding-editor__distance_functions"
+          @format="large"
           @name="pg_function"
           @title={{i18n "discourse_ai.embeddings.distance_function"}}
           @tooltip={{i18n "discourse_ai.embeddings.hints.distance_function"}}
-          @format="large"
+          @type="select"
           @validation="required"
-          class="ai-embedding-editor__distance_functions"
           as |field|
         >
-          <field.Select @includeNone={{false}} as |select|>
+          <field.Control @includeNone={{false}} as |select|>
             {{#each this.distanceFunctions as |df|}}
               <select.Option @value={{df.id}}>{{df.name}}</select.Option>
             {{/each}}
-          </field.Select>
+          </field.Control>
         </form.Field>
 
         {{! provider-specific content }}
@@ -517,27 +538,28 @@ export default class AiEmbeddingEditor extends Component {
               {{#let (get this.providerParams name) as |params|}}
                 {{#if params}}
                   <object.Field
+                    class="ai-embedding-editor-provider-param__{{params.type}}"
+                    @format="large"
                     @name={{name}}
                     @title={{i18n
                       (concat "discourse_ai.embeddings.provider_fields." name)
                     }}
-                    @format="large"
+                    @type={{this.fieldTypeForProviderParam params.type}}
                     @validation="required"
-                    class="ai-embedding-editor-provider-param__{{params.type}}"
                     as |field|
                   >
                     {{#if (eq params.type "enum")}}
-                      <field.Select @includeNone={{false}} as |select|>
+                      <field.Control @includeNone={{false}} as |select|>
                         {{#each params.values as |option|}}
                           <select.Option
                             @value={{option.id}}
                           >{{option.name}}</select.Option>
                         {{/each}}
-                      </field.Select>
+                      </field.Control>
                     {{else if (eq params.type "checkbox")}}
-                      <field.Checkbox />
+                      <field.Control />
                     {{else}}
-                      <field.Input @type={{params.type}} />
+                      <field.Control />
                     {{/if}}
                   </object.Field>
                 {{/if}}
@@ -547,45 +569,45 @@ export default class AiEmbeddingEditor extends Component {
         {{/if}}
 
         <form.Actions class="ai-embedding-editor__action_panel">
+          <form.Submit
+            class="btn-primary ai-embedding-editor__save"
+            @label="discourse_ai.embeddings.save"
+          />
           <form.Button
+            class="btn-default ai-embedding-editor__test"
             @action={{fn this.test data}}
             @disabled={{this.testRunning}}
             @label="discourse_ai.embeddings.tests.title"
-            class="ai-embedding-editor__test"
-          />
-
-          <form.Submit
-            @label="discourse_ai.embeddings.save"
-            class="btn-primary ai-embedding-editor__save"
           />
 
           {{#unless data.isNew}}
             <form.Button
-              @action={{this.delete}}
-              @label="discourse_ai.embeddings.delete"
               class="btn-danger ai-embedding-editor__delete"
+              @action={{this.delete}}
+              @icon="trash-can"
+              @label="discourse_ai.embeddings.delete"
             />
           {{/unless}}
         </form.Actions>
 
         {{#if this.displayTestResult}}
-          <form.Container @format="full" class="ai-embedding-editor-tests">
-            <ConditionalLoadingSpinner
-              @size="small"
+          <form.Container class="ai-embedding-editor-tests" @format="full">
+            <DConditionalLoadingSpinner
               @condition={{this.testRunning}}
+              @size="small"
             >
               {{#if this.testResult}}
                 <div class="ai-embedding-editor-tests__success">
-                  {{icon "check"}}
+                  {{dIcon "check"}}
                   {{i18n "discourse_ai.embeddings.tests.success"}}
                 </div>
               {{else}}
                 <div class="ai-embedding-editor-tests__failure">
-                  {{icon "xmark"}}
+                  {{dIcon "xmark"}}
                   {{this.testErrorMessage}}
                 </div>
               {{/if}}
-            </ConditionalLoadingSpinner>
+            </DConditionalLoadingSpinner>
           </form.Container>
         {{/if}}
       </Form>

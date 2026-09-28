@@ -1,7 +1,9 @@
 {
   "references": [
     { "path": "frontend/discourse" },
+    { "path": "frontend/discourse-i18n" },
     { "path": "plugins/automation" },
+    { "path": "plugins/boards" },
     { "path": "plugins/chat" },
     { "path": "plugins/checklist" },
     { "path": "plugins/discourse-adplugin" },
@@ -10,14 +12,14 @@
     { "path": "plugins/discourse-apple-auth" },
     { "path": "plugins/discourse-assign" },
     { "path": "plugins/discourse-cakeday" },
-    { "path": "plugins/discourse-calendar" },
+    { "path": "plugins/discourse-events" },
     { "path": "plugins/discourse-chat-integration" },
     { "path": "plugins/discourse-data-explorer" },
     { "path": "plugins/discourse-details" },
     { "path": "plugins/discourse-gamification" },
     { "path": "plugins/discourse-github" },
     { "path": "plugins/discourse-graphviz" },
-    { "path": "plugins/discourse-hcaptcha" },
+    { "path": "plugins/discourse-captcha" },
     { "path": "plugins/discourse-lazy-videos" },
     { "path": "plugins/discourse-local-dates" },
     { "path": "plugins/discourse-login-with-amazon" },
@@ -43,6 +45,7 @@
     { "path": "plugins/poll" },
     { "path": "plugins/spoiler-alert" },
     { "path": "plugins/styleguide" },
+    { "path": "themes/horizon" }
   ],
-  "include": [],
+  "include": []
 }

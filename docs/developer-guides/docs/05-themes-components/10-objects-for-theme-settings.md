@@ -66,7 +66,7 @@ The above schema definition states that the `link` object has a `name` property 
 - `integer`: Value of property is stored as an integer.
 - `float`: Value of property is stored as a float.
 - `boolean`: Value of property is `true` or `false`.
-- `uploads`: Value of property is the attachment URL
+- `upload`: Value of property is the attachment URL
 - `enum`: Value of property must be one of the values defined in the `choices` keyword.
   ```yaml
   links:
@@ -85,6 +85,7 @@ The above schema definition states that the `link` object has a `name` property 
 - `categories`: Value of property is an array of valid category ids.
 - `groups`: Value of property is an array of valid group ids.
 - `tags`: Value of property is an array of valid tag names.
+- `icon`: Value of property is the name of a single icon from the Discourse icon set. Selected icons are automatically added to the sprite sheet, so they can be rendered without being registered separately.
 
 With the schema defined, the default value of the setting can now be set by defining a array in yaml like so:
 
@@ -107,7 +108,7 @@ links:
 
 #### Required properties
 
-All properties defined are optional by default. To mark a property as required, simply annotate the property with `required: true. A property can also be marked as optional by annotating the property with `required: false`.
+All properties defined are optional by default. To mark a property as required, simply annotate the property with `required: true`. A property can also be marked as optional by annotating the property with `required: false`.
 
 ```yaml
 links:
@@ -124,6 +125,8 @@ links:
         required: false
 ```
 
+Blank `string`, `datetime` and `icon` values and empty `categories`, `groups` and `tags` lists count as missing: required properties reject them and optional properties skip their validations. `false` counts as set.
+
 #### Custom Validations
 
 For certain property types, there are built in support for custom validations which can be declared by annotating the property with the `validations` keyword.
@@ -139,8 +142,8 @@ links:
         type: string
         required: true
         validations:
-          min: 1
-          max: 2048
+          min_length: 1
+          max_length: 2048
           url: true
 ```
 
@@ -159,6 +162,42 @@ links:
 
 - `min`: Minimum number of records for the property. Value of the keyword has to be an integer.
 - `max`: Maximum number of records for the property. Value of the keyword has to be an integer.
+
+#### Resolving group membership
+
+Object settings can resolve `type: groups` properties to a boolean for the current user. This is useful when theme code only needs to know whether the current user is in one of the configured groups, because `currentUser.groups` only includes groups that are visible to the user.
+
+Add `resolve_group_membership: true` to the `groups` property:
+
+```yaml
+menu_sections:
+  type: objects
+  default:
+    - name: section 1
+      groups:
+        - 1
+        - 3
+  schema:
+    name: menu section
+    properties:
+      name:
+        type: string
+      groups:
+        type: groups
+        resolve_group_membership: true
+```
+
+The admin UI and stored setting value still use the original `groups` array. In the frontend runtime `settings` object, Discourse removes the group IDs from each object and adds a boolean with the same property name prefixed by `user_in_`:
+
+```gjs
+for (const section of settings.menu_sections) {
+  if (section.user_in_groups) {
+    // User is in at least one selected group for this section.
+  }
+}
+```
+
+This option is only valid on object schema properties with `type: groups`. It also works on nested object schemas and with automatic groups such as `logged_in_users` and `anonymous_users`.
 
 #### Nested objects structure
 

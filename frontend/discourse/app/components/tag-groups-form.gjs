@@ -1,21 +1,19 @@
 /* eslint-disable ember/no-classic-components */
-import { cached } from "@glimmer/tracking";
 import Component, { Input } from "@ember/component";
 import { hash } from "@ember/helper";
-import { action } from "@ember/object";
-import { dependentKeyCompat } from "@ember/object/compat";
+import { action, computed } from "@ember/object";
 import { service } from "@ember/service";
 import { isEmpty } from "@ember/utils";
 import { tagName } from "@ember-decorators/component";
-import BufferedProxy from "ember-buffered-proxy/proxy";
-import DButton from "discourse/components/d-button";
-import RadioButton from "discourse/components/radio-button";
-import TextField from "discourse/components/text-field";
+import { popupAjaxError } from "discourse/lib/ajax-error";
+import BufferedProxy from "discourse/lib/buffered-proxy";
 import { AUTO_GROUPS } from "discourse/lib/constants";
-import discourseComputed from "discourse/lib/decorators";
 import PermissionType from "discourse/models/permission-type";
 import GroupChooser from "discourse/select-kit/components/group-chooser";
 import TagChooser from "discourse/select-kit/components/tag-chooser";
+import DButton from "discourse/ui-kit/d-button";
+import DRadioButton from "discourse/ui-kit/d-radio-button";
+import DTextField from "discourse/ui-kit/d-text-field";
 import { i18n } from "discourse-i18n";
 
 @tagName("")
@@ -28,16 +26,16 @@ export default class TagGroupsForm extends Component {
     ({ id }) => id !== AUTO_GROUPS.everyone.id
   );
 
-  @cached
-  @dependentKeyCompat
+  @computed("model")
   get buffered() {
     return BufferedProxy.create({
       content: this.model,
     });
   }
 
-  @discourseComputed("buffered.permissions")
-  selectedGroupIds(permissions) {
+  @computed("buffered.permissions")
+  get selectedGroupIds() {
+    const permissions = this.get("buffered.permissions"); // TODO (devxp) we need a buffered proxy that works with tracked properties
     if (!permissions) {
       return [];
     }
@@ -85,16 +83,16 @@ export default class TagGroupsForm extends Component {
     }
 
     if (isEmpty(attrs.name)) {
-      this.dialog.alert("tagging.groups.cannot_save.empty_name");
+      this.dialog.alert(i18n("tagging.groups.cannot_save.empty_name"));
       return false;
     }
 
     if (isEmpty(attrs.tags)) {
-      this.dialog.alert("tagging.groups.cannot_save.no_tags");
+      this.dialog.alert(i18n("tagging.groups.cannot_save.no_tags"));
       return false;
     }
 
-    attrs.permissions ??= {};
+    attrs.permissions = { ...(attrs.permissions ?? {}) };
 
     const permissionName = this.buffered.get("permissionName");
 
@@ -104,18 +102,20 @@ export default class TagGroupsForm extends Component {
       attrs.permissions[0] = PermissionType.READONLY;
     } else if (permissionName === "private") {
       delete attrs.permissions[0];
-    } else {
-      this.dialog.alert("tagging.groups.cannot_save.no_groups");
-      return false;
+
+      const hasGroups = Object.keys(attrs.permissions).some(
+        (k) => parseInt(k, 10) !== AUTO_GROUPS.everyone.id
+      );
+      if (!hasGroups) {
+        this.dialog.alert(i18n("tagging.groups.cannot_save.no_groups"));
+        return false;
+      }
     }
 
-    this.model.save(attrs).then(() => this.onSave?.());
-  }
-
-  #serializeTag(t) {
-    return typeof t.id === "number"
-      ? { id: t.id, name: t.name }
-      : { name: t.name };
+    this.model
+      .save(attrs)
+      .then(() => this.onSave?.())
+      .catch(popupAjaxError);
   }
 
   @action
@@ -127,24 +127,30 @@ export default class TagGroupsForm extends Component {
     });
   }
 
+  #serializeTag(t) {
+    return typeof t.id === "number"
+      ? { id: t.id, name: t.name }
+      : { name: t.name };
+  }
+
   <template>
     <section class="group-name">
       <label>{{i18n "tagging.groups.name_placeholder"}}</label>
       <div>
-        <TextField @value={{this.buffered.name}} /></div>
+        <DTextField @value={{this.buffered.name}} /></div>
     </section>
 
     <section class="group-tags-list">
       <label>{{i18n "tagging.groups.tags_label"}}</label><br />
       <TagChooser
-        @tags={{this.buffered.tags}}
         @everyTag={{true}}
-        @unlimitedTagCount={{true}}
         @excludeSynonyms={{true}}
         @options={{hash
           allowAny=true
           filterPlaceholder="tagging.groups.tags_placeholder"
         }}
+        @tags={{this.buffered.tags}}
+        @unlimitedTagCount={{true}}
       />
     </section>
 
@@ -152,7 +158,6 @@ export default class TagGroupsForm extends Component {
       <label>{{i18n "tagging.groups.parent_tag_label"}}</label>
       <div>
         <TagChooser
-          @tags={{this.buffered.parent_tag}}
           @everyTag={{true}}
           @excludeSynonyms={{true}}
           @options={{hash
@@ -160,6 +165,7 @@ export default class TagGroupsForm extends Component {
             filterPlaceholder="tagging.groups.parent_tag_placeholder"
             maximum=1
           }}
+          @tags={{this.buffered.parent_tag}}
         />
       </div>
       <div class="description">{{i18n
@@ -170,9 +176,9 @@ export default class TagGroupsForm extends Component {
     <section class="group-one-per-topic">
       <label>
         <Input
-          @type="checkbox"
-          @checked={{this.buffered.one_per_topic}}
           name="onepertopic"
+          @checked={{this.buffered.one_per_topic}}
+          @type="checkbox"
         />
         {{i18n "tagging.groups.one_per_topic_label"}}
       </label>
@@ -180,12 +186,12 @@ export default class TagGroupsForm extends Component {
 
     <section class="group-visibility">
       <div class="group-visibility-option">
-        <RadioButton
-          @name="tag-permissions-choice"
-          @value="public"
-          @id="public-permission"
-          @selection={{this.buffered.permissionName}}
+        <DRadioButton
           class="tag-permissions-choice"
+          @id="public-permission"
+          @name="tag-permissions-choice"
+          @selection={{this.buffered.permissionName}}
+          @value="public"
         />
 
         <label class="radio" for="public-permission">
@@ -193,12 +199,12 @@ export default class TagGroupsForm extends Component {
         </label>
       </div>
       <div class="group-visibility-option">
-        <RadioButton
-          @name="tag-permissions-choice"
-          @value="visible"
-          @id="visible-permission"
-          @selection={{this.buffered.permissionName}}
+        <DRadioButton
           class="tag-permissions-choice"
+          @id="visible-permission"
+          @name="tag-permissions-choice"
+          @selection={{this.buffered.permissionName}}
+          @value="visible"
         />
 
         <label class="radio" for="visible-permission">
@@ -208,22 +214,22 @@ export default class TagGroupsForm extends Component {
         <div class="group-access-control">
           <GroupChooser
             @content={{this.allGroups}}
-            @value={{this.selectedGroupIds}}
             @labelProperty="name"
             @onChange={{this.setPermissionsGroups}}
             @options={{hash
               filterPlaceholder="tagging.groups.select_groups_placeholder"
             }}
+            @value={{this.selectedGroupIds}}
           />
         </div>
       </div>
       <div class="group-visibility-option">
-        <RadioButton
-          @name="tag-permissions-choice"
-          @value="private"
-          @id="private-permission"
-          @selection={{this.buffered.permissionName}}
+        <DRadioButton
           class="tag-permissions-choice"
+          @id="private-permission"
+          @name="tag-permissions-choice"
+          @selection={{this.buffered.permissionName}}
+          @value="private"
         />
 
         <label class="radio" for="private-permission">
@@ -233,12 +239,12 @@ export default class TagGroupsForm extends Component {
         <div class="group-access-control">
           <GroupChooser
             @content={{this.allGroups}}
-            @value={{this.selectedGroupIds}}
             @labelProperty="name"
             @onChange={{this.setPermissionsGroups}}
             @options={{hash
               filterPlaceholder="tagging.groups.select_groups_placeholder"
             }}
+            @value={{this.selectedGroupIds}}
           />
         </div>
       </div>
@@ -246,18 +252,18 @@ export default class TagGroupsForm extends Component {
 
     <div class="tag-group-controls">
       <DButton
+        class="btn-primary"
         @action={{this.save}}
         @disabled={{this.buffered.isSaving}}
         @label="tagging.groups.save"
-        class="btn-primary"
       />
 
       <DButton
+        class="btn-danger"
         @action={{this.destroyTagGroup}}
         @disabled={{this.buffered.isNew}}
         @icon="trash-can"
         @label="tagging.groups.delete"
-        class="btn-danger"
       />
     </div>
   </template>

@@ -3,18 +3,18 @@ import Component from "@ember/component";
 import { action } from "@ember/object";
 import { cancel, next, throttle } from "@ember/runloop";
 import { service } from "@ember/service";
-import { htmlSafe } from "@ember/template";
+import { trustHTML } from "@ember/template";
 import { tagName } from "@ember-decorators/component";
 import { observes } from "@ember-decorators/object";
 import PluginOutlet from "discourse/components/plugin-outlet";
 import bodyClass from "discourse/helpers/body-class";
-import concatClass from "discourse/helpers/concat-class";
 import htmlClass from "discourse/helpers/html-class";
 import lazyHash from "discourse/helpers/lazy-hash";
 import { bind } from "discourse/lib/decorators";
 import getURL from "discourse/lib/get-url";
 import DiscourseURL from "discourse/lib/url";
 import { escapeExpression } from "discourse/lib/utilities";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
 import chatResizableNode from "discourse/plugins/chat/discourse/modifiers/chat/resizable-node";
 
 @tagName("")
@@ -31,10 +31,18 @@ export default class ChatDrawer extends Component {
   hasUnreadMessages = false;
   drawerStyle = null;
 
+  get drawerActions() {
+    return {
+      openInFullPage: this.openInFullPage,
+      close: this.close,
+      toggleExpand: this.toggleExpand,
+    };
+  }
+
   didInsertElement() {
     super.didInsertElement(...arguments);
 
-    if (!this.chat.userCanChat) {
+    if (!this.chat.userCanChat && !this.chat.anonymousUserCanViewPublicChat) {
       return;
     }
 
@@ -45,7 +53,7 @@ export default class ChatDrawer extends Component {
     this.appEvents.on("composer:opened", this, "_checkSize");
     this.appEvents.on("composer:resized", this, "_checkSize");
     this.appEvents.on("composer:div-resizing", this, "_dynamicCheckSize");
-    window.addEventListener("resize", this._checkSize);
+    window.addEventListener("resize", this._dynamicCheckSize);
     this.appEvents.on(
       "composer:resize-started",
       this,
@@ -59,11 +67,11 @@ export default class ChatDrawer extends Component {
   willDestroyElement() {
     super.willDestroyElement(...arguments);
 
-    if (!this.chat.userCanChat) {
+    if (!this.chat.userCanChat && !this.chat.anonymousUserCanViewPublicChat) {
       return;
     }
 
-    window.removeEventListener("resize", this._checkSize);
+    window.removeEventListener("resize", this._dynamicCheckSize);
 
     if (this.appEvents) {
       this.appEvents.off("chat:open-url", this, "openURL");
@@ -92,90 +100,11 @@ export default class ChatDrawer extends Component {
     }
   }
 
-  @observes("chatStateManager.isDrawerActive")
-  _fireHiddenAppEvents() {
-    this.appEvents.trigger("chat:rerender-header");
-  }
-
   computeDrawerStyle() {
     const { width, height } = this.chatDrawerSize.size;
     let style = `width: ${escapeExpression((width || "0").toString())}px;`;
     style += `height: ${escapeExpression((height || "0").toString())}px;`;
-    this.set("drawerStyle", htmlSafe(style));
-  }
-
-  get drawerActions() {
-    return {
-      openInFullPage: this.openInFullPage,
-      close: this.close,
-      toggleExpand: this.toggleExpand,
-    };
-  }
-
-  @bind
-  _dynamicCheckSize() {
-    if (!this.chatStateManager.isDrawerActive) {
-      return;
-    }
-
-    if (this.rafTimer) {
-      return;
-    }
-
-    this.rafTimer = window.requestAnimationFrame(() => {
-      this.rafTimer = null;
-      this._performCheckSize();
-    });
-  }
-
-  _startDynamicCheckSize() {
-    if (!this.chatStateManager.isDrawerActive) {
-      return;
-    }
-
-    document
-      .querySelector(".chat-drawer-outlet-container")
-      .classList.add("clear-transitions");
-  }
-
-  _clearDynamicCheckSize() {
-    if (!this.chatStateManager.isDrawerActive) {
-      return;
-    }
-
-    document
-      .querySelector(".chat-drawer-outlet-container")
-      .classList.remove("clear-transitions");
-    this._checkSize();
-  }
-
-  @bind
-  _checkSize() {
-    this.sizeTimer = throttle(this, this._performCheckSize, 150);
-  }
-
-  _performCheckSize() {
-    if (this.isDestroying || this.isDestroyed) {
-      return;
-    }
-
-    const drawerContainer = document.querySelector(
-      ".chat-drawer-outlet-container"
-    );
-    if (!drawerContainer) {
-      return;
-    }
-
-    const composer = document.getElementById("reply-control");
-    const composerIsClosed = composer.classList.contains("closed");
-    const minRightMargin = 15;
-
-    drawerContainer.style.setProperty(
-      "--composer-right",
-      (composerIsClosed
-        ? minRightMargin
-        : Math.max(minRightMargin, composer.offsetLeft)) + "px"
-    );
+    this.set("drawerStyle", trustHTML(style));
   }
 
   @action
@@ -183,17 +112,6 @@ export default class ChatDrawer extends Component {
     this.chat.activeChannel = null;
     this.chatDrawerRouter.stateFor(this._routeFromURL(url));
     this.chatStateManager.didOpenDrawer(url);
-  }
-
-  _routeFromURL(url) {
-    let route = this.router.recognize(getURL(url || "/"));
-
-    // ember might recognize the index subroute
-    if (route.localName === "index") {
-      route = route.parent;
-    }
-
-    return route;
   }
 
   @action
@@ -227,6 +145,111 @@ export default class ChatDrawer extends Component {
   @action
   didResize(element, { width, height }) {
     this.chatDrawerSize.size = { width, height };
+    this._checkSize();
+  }
+
+  @observes("chatStateManager.isDrawerActive")
+  _fireHiddenAppEvents() {
+    this.appEvents.trigger("chat:rerender-header");
+  }
+
+  @bind
+  _dynamicCheckSize() {
+    if (!this.chatStateManager.isDrawerActive) {
+      return;
+    }
+
+    if (this.rafTimer) {
+      return;
+    }
+
+    this.rafTimer = window.requestAnimationFrame(() => {
+      this.rafTimer = null;
+      this._performCheckSize();
+    });
+  }
+
+  _startDynamicCheckSize() {
+    if (!this.chatStateManager.isDrawerActive) {
+      return;
+    }
+
+    // The flag can be set while the container is absent — `_performCheckSize`
+    // null-checks the same selector for that reason.
+    document
+      .querySelector(".chat-drawer-outlet-container")
+      ?.classList.add("clear-transitions");
+  }
+
+  _clearDynamicCheckSize() {
+    if (!this.chatStateManager.isDrawerActive) {
+      return;
+    }
+
+    document
+      .querySelector(".chat-drawer-outlet-container")
+      ?.classList.remove("clear-transitions");
+    this._checkSize();
+  }
+
+  @bind
+  _checkSize() {
+    this.sizeTimer = throttle(this, this._performCheckSize, 150);
+  }
+
+  _performCheckSize() {
+    if (this.isDestroying) {
+      return;
+    }
+
+    const drawerContainer = document.querySelector(
+      ".chat-drawer-outlet-container"
+    );
+    if (!drawerContainer) {
+      return;
+    }
+
+    const composer = document.getElementById("reply-control");
+    const composerIsClosed = composer.classList.contains("closed");
+    const minRightMargin = 15;
+
+    const isPeekMode = document.body.classList.contains("peek-mode-active");
+
+    if (composerIsClosed || isPeekMode) {
+      drawerContainer.style.setProperty(
+        "--composer-right",
+        minRightMargin + "px"
+      );
+      drawerContainer.classList.remove("above-composer");
+      return;
+    }
+
+    const isRTL = document.documentElement.classList.contains("rtl");
+    const spaceToEnd = isRTL
+      ? composer.offsetLeft
+      : document.documentElement.clientWidth -
+        composer.offsetLeft -
+        composer.offsetWidth;
+    const drawerWidth = this.chatDrawerSize.size.width || 400;
+    const aboveComposer = spaceToEnd < drawerWidth;
+
+    drawerContainer.style.setProperty(
+      "--composer-right",
+      (aboveComposer ? Math.max(minRightMargin, spaceToEnd) : minRightMargin) +
+        "px"
+    );
+    drawerContainer.classList.toggle("above-composer", aboveComposer);
+  }
+
+  _routeFromURL(url) {
+    let route = this.router.recognize(getURL(url || "/"));
+
+    // ember might recognize the index subroute
+    if (route.localName === "index") {
+      route = route.parent;
+    }
+
+    return route;
   }
 
   <template>
@@ -241,16 +264,16 @@ export default class ChatDrawer extends Component {
 
     {{#if this.chatStateManager.isDrawerActive}}
       <div
-        data-chat-channel-id={{this.chatDrawerRouter.model.channel.id}}
-        data-chat-thread-id={{this.chatDrawerRouter.model.channel.activeThread.id}}
-        class={{concatClass
+        class={{dConcatClass
           "chat-drawer"
           (if
             this.chatStateManager.isDrawerExpanded "is-expanded" "is-collapsed"
           )
         }}
-        {{chatResizableNode ".chat-drawer-resizer" this.didResize}}
+        data-chat-channel-id={{this.chatDrawerRouter.model.channel.id}}
+        data-chat-thread-id={{this.chatDrawerRouter.model.channel.activeThread.id}}
         style={{this.drawerStyle}}
+        {{chatResizableNode ".chat-drawer-resizer" this.didResize}}
       >
         <div class="chat-drawer-container">
           <div class="chat-drawer-resizer"></div>
@@ -263,13 +286,13 @@ export default class ChatDrawer extends Component {
           />
 
           <this.chatDrawerRouter.component
-            @params={{this.chatDrawerRouter.params}}
-            @model={{this.chatDrawerRouter.model}}
-            @openURL={{this.openURL}}
-            @openInFullPage={{this.openInFullPage}}
-            @toggleExpand={{this.toggleExpand}}
             @close={{this.close}}
             @drawerActions={{this.drawerActions}}
+            @model={{this.chatDrawerRouter.model}}
+            @openInFullPage={{this.openInFullPage}}
+            @openURL={{this.openURL}}
+            @params={{this.chatDrawerRouter.params}}
+            @toggleExpand={{this.toggleExpand}}
           />
         </div>
       </div>

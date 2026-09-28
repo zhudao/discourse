@@ -1,10 +1,10 @@
 /* eslint-disable ember/no-classic-components */
 import Component from "@ember/component";
+import { computed } from "@ember/object";
 import { dependentKeyCompat } from "@ember/object/compat";
 import { tagName } from "@ember-decorators/component";
-import concatClass from "discourse/helpers/concat-class";
-import discourseComputed from "discourse/lib/decorators";
 import { filterTypeForMode } from "discourse/lib/filter-mode";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
 
 @tagName("")
 export default class NavigationItem extends Component {
@@ -18,23 +18,23 @@ export default class NavigationItem extends Component {
     return filterTypeForMode(this.filterMode);
   }
 
-  @discourseComputed("content.filterType", "filterType", "content.active")
-  active(contentFilterType, filterType, active) {
-    if (active !== undefined) {
-      return active;
+  @computed("content.filterType", "filterType", "content.active")
+  get active() {
+    if (this.content?.active !== undefined) {
+      return this.content?.active;
     }
-    return contentFilterType === filterType;
+    return this.content?.filterType === this.filterType;
   }
 
-  @discourseComputed("content.count", "content.name")
-  isHidden(count, name) {
+  @computed("content.count", "content.name")
+  get isHidden() {
     return (
       !this.active &&
       this.currentUser &&
-      !this.currentUser.new_new_view_enabled &&
+      !this.currentUser.unified_new_enabled &&
       this.currentUser.trust_level > 0 &&
-      (name === "new" || name === "unread") &&
-      count < 1
+      (this.content?.name === "new" || this.content?.name === "unread") &&
+      this.content?.count < 1
     );
   }
 
@@ -87,20 +87,20 @@ export default class NavigationItem extends Component {
 
   <template>
     <li
-      title={{this.content.title}}
-      class={{concatClass
+      class={{dConcatClass
         (if this.active "active")
         (if this.content.hasIcon "has-icon")
         this.content.classNames
         (if this.isHidden "hidden")
         this.content.name
       }}
+      title={{this.content.title}}
       ...attributes
     >
       <a
-        href={{this.hrefLink}}
-        class={{this.activeClass}}
         aria-current={{if this.activeClass "page"}}
+        class={{this.activeClass}}
+        href={{this.hrefLink}}
       >
         {{#if this.hasIcon}}
           <span class={{this.content.name}}></span>

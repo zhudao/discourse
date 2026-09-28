@@ -4,6 +4,7 @@ import { ajax } from "discourse/lib/ajax";
 export default class AdminSiteTextEditRoute extends Route {
   queryParams = {
     locale: { replace: true },
+    themeId: { replace: true },
   };
 
   async model(params) {
@@ -21,6 +22,7 @@ export default class AdminSiteTextEditRoute extends Route {
       return locale.value === controller.locale;
     }).name;
 
+    controller.resetTextarea();
     controller.setProperties({
       siteText,
       saved: false,

@@ -16,6 +16,10 @@ export default function () {
         resetNamespace: true,
       });
     });
+    this.route("adminSiteTraffic", {
+      path: "/dashboard/site-traffic-explorer",
+      resetNamespace: true,
+    });
 
     this.route(
       "adminSiteSettings",
@@ -157,6 +161,14 @@ export default function () {
     );
 
     this.route(
+      "adminProblemChecks",
+      { path: "/problem-checks", resetNamespace: true },
+      function () {
+        this.route("index", { path: "/" });
+      }
+    );
+
+    this.route(
       "adminReports",
       { path: "/reports", resetNamespace: true },
       function () {
@@ -260,6 +272,19 @@ export default function () {
           this.route("postsAndTopics", { path: "/posts-and-topics" });
           this.route("statsAndThresholds", { path: "/stats-and-thresholds" });
         });
+        this.route(
+          "categoryManagement",
+          { path: "/category-management" },
+          function () {
+            this.route("index", {
+              path: "/",
+            });
+            this.route("settings");
+            this.route("type", {
+              path: "/:category_type_id",
+            });
+          }
+        );
         this.route("localization", function () {
           this.route("settings", {
             path: "/",
@@ -362,6 +387,7 @@ export default function () {
           { path: "/emoji", resetNamespace: true },
           function () {
             this.route("new");
+            this.route("import");
             this.route("index", { path: "/" });
             this.route("settings");
           }
@@ -369,8 +395,28 @@ export default function () {
         this.route("developer", function () {
           this.route("settings", { path: "/" });
         });
+        this.route("mcp", function () {
+          this.route("index", { path: "/" });
+          this.route("access", function () {
+            this.route("index", { path: "/" });
+            this.route("new");
+            this.route("edit", { path: "/:group_id/edit" });
+          });
+          this.route("capabilities");
+          this.route("clients", function () {
+            this.route("index", { path: "/" });
+            this.route("new");
+            this.route("show", { path: "/:id" });
+          });
+          this.route("authorizations");
+          this.route("activity");
+          this.route("settings");
+        });
         this.route("logo");
         this.route("fonts");
+        this.route("gifs", function () {
+          this.route("settings", { path: "/" });
+        });
         this.route("adminWelcomeBanner", { path: "/welcome-banner" });
         this.route("navigation", function () {
           this.route("settings", { path: "/" });
@@ -435,7 +481,10 @@ export default function () {
     );
   });
 
-  this.route("newCategory", { path: "/new-category" });
+  this.route("newCategory", { path: "/new-category" }, function () {
+    this.route("setup");
+    this.route("tabs", { path: "/:tab" });
+  });
 
   this.route("editCategory", { path: "/c/*slug/edit" }, function () {
     this.route("tabs", { path: "/:tab" });

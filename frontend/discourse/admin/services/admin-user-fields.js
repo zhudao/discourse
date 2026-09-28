@@ -1,21 +1,34 @@
-import { sort } from "@ember/object/computed";
+import { tracked } from "@glimmer/tracking";
+import { dependentKeyCompat } from "@ember/object/compat";
 import Service, { service } from "@ember/service";
 import { popupAjaxError } from "discourse/lib/ajax-error";
-import { trackedArray } from "discourse/lib/tracked-tools";
+import { arraySortedByProperties } from "discourse/lib/array-tools";
+import { autoTrackedArray } from "discourse/lib/tracked-tools";
 
 export default class AdminUserFields extends Service {
   @service store;
 
-  @trackedArray userFields = [];
+  @tracked fieldSortOrder = ["position"];
 
-  @sort("userFields", "fieldSortOrder") sortedUserFields;
-
-  fieldSortOrder = ["position"];
+  @autoTrackedArray userFields = [];
 
   constructor() {
     super(...arguments);
 
     this.#fetchUserFields();
+  }
+
+  @dependentKeyCompat
+  get sortedUserFields() {
+    return arraySortedByProperties(this.userFields, this.fieldSortOrder);
+  }
+
+  get firstField() {
+    return this.sortedUserFields[0];
+  }
+
+  get lastField() {
+    return this.sortedUserFields[this.sortedUserFields.length - 1];
   }
 
   async #fetchUserFields() {
@@ -25,13 +38,5 @@ export default class AdminUserFields extends Service {
     } catch (err) {
       popupAjaxError(err);
     }
-  }
-
-  get firstField() {
-    return this.sortedUserFields[0];
-  }
-
-  get lastField() {
-    return this.sortedUserFields[this.sortedUserFields.length - 1];
   }
 }

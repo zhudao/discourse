@@ -4,12 +4,12 @@ module PageObjects
   module Pages
     class TagSettings < PageObjects::Pages::Base
       def visit(tag)
-        page.visit "/tag/#{tag.slug}/#{tag.id}/edit/general"
+        page.visit "/tag/#{tag.slug_for_url}/#{tag.id}/edit/general"
         self
       end
 
       def visit_tab(tag, tab)
-        page.visit "/tag/#{tag.slug}/#{tag.id}/edit/#{tab}"
+        page.visit "/tag/#{tag.slug_for_url}/#{tag.id}/edit/#{tab}"
         self
       end
 
@@ -51,6 +51,19 @@ module PageObjects
         self
       end
 
+      def remove_localization
+        find(".form-kit__collection .btn-danger").click
+        self
+      end
+
+      def has_localizations?
+        has_css?(".form-kit__collection")
+      end
+
+      def has_no_localizations?
+        has_no_css?(".form-kit__collection")
+      end
+
       def name_input
         find("input[name='name']")
       end
@@ -60,7 +73,7 @@ module PageObjects
       end
 
       def description_textarea
-        find("textarea[name='description']")
+        find(".form-kit__field[data-name='description'] textarea.d-editor-input")
       end
 
       def fill_name(value)

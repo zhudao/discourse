@@ -20,6 +20,21 @@ RSpec.describe Admin::UsersController do
         expect(response.parsed_body).to be_present
       end
 
+      it "loads second-factor status in batches" do
+        Fabricate(:user_second_factor_totp, user: user)
+        Fabricate(:user_security_key, user: coding_horror)
+        Fabricate(:passkey_with_random_credential, user: moderator)
+
+        queries = track_sql_queries { get "/admin/users/list/active.json" }
+
+        users_by_id = response.parsed_body.index_by { |serialized_user| serialized_user["id"] }
+        expect(users_by_id[user.id]["second_factor_enabled"]).to eq(true)
+        expect(users_by_id[coding_horror.id]["second_factor_enabled"]).to eq(true)
+        expect(users_by_id[moderator.id]).not_to have_key("second_factor_enabled")
+        expect(queries.count { |query| query.include?('FROM "user_second_factors"') }).to eq(1)
+        expect(queries.count { |query| query.include?('FROM "user_security_keys"') }).to eq(1)
+      end
+
       it "returns silence reason when user is silenced" do
         silencer =
           UserSilencer.new(
@@ -36,6 +51,65 @@ RSpec.describe Admin::UsersController do
 
         silenced_user = response.parsed_body.find { |u| u["id"] == user.id }
         expect(silenced_user["silence_reason"]).to eq("because I said so")
+      end
+
+      it "returns suspend reason when user is suspended" do
+        UserSuspender.new(
+          user,
+          suspended_till: 1.year.from_now,
+          reason: "because I said so",
+          by_user: admin,
+        ).suspend
+
+        get "/admin/users/list.json"
+        expect(response.status).to eq(200)
+
+        suspended_user = response.parsed_body.find { |u| u["id"] == user.id }
+        expect(suspended_user["suspend_reason"]).to eq("because I said so")
+      end
+
+      it "reports an already-suspended user as not suspendable" do
+        UserSuspender.new(
+          user,
+          suspended_till: 1.year.from_now,
+          reason: "spam",
+          by_user: admin,
+        ).suspend
+
+        get "/admin/users/list/suspended.json"
+        expect(response.status).to eq(200)
+
+        suspended_user = response.parsed_body.find { |u| u["id"] == user.id }
+        expect(suspended_user["can_be_suspended"]).to eq(false)
+      end
+
+      it "filters by activation status on the new tab" do
+        not_activated_user = Fabricate(:user, active: false)
+
+        get "/admin/users/list/new.json", params: { activation: "not_activated" }
+        expect(response.status).to eq(200)
+
+        ids = response.parsed_body.map { |u| u["id"] }
+        expect(ids).to include(not_activated_user.id)
+        expect(ids).not_to include(admin.id)
+      end
+
+      it "filters by multiple usernames or emails at once" do
+        user_one = Fabricate(:user, username: "bulk_user_1")
+        user_two = Fabricate(:user, email: "bulk2@example.com")
+
+        get "/admin/users/list.json", params: { filter: "bulk_user_1,bulk2@example.com" }
+        expect(response.status).to eq(200)
+
+        ids = response.parsed_body.map { |u| u["id"] }
+        expect(ids).to contain_exactly(user_one.id, user_two.id)
+      end
+
+      it "returns a 400 when the filter has too many terms" do
+        filter = (0..AdminUserIndexQuery::MAX_FILTER_TERMS).map { |i| "u#{i}" }.join(",")
+
+        get "/admin/users/list.json", params: { filter: filter }
+        expect(response.status).to eq(400)
       end
 
       context "when showing emails" do
@@ -71,6 +145,70 @@ RSpec.describe Admin::UsersController do
 
         expect(response.status).to eq(200)
         expect(response.parsed_body).to be_present
+      end
+
+      it "doesn't return staged user emails when moderators_view_emails is disabled" do
+        SiteSetting.moderators_view_emails = false
+        staged_user = Fabricate(:staged, email: "staged@example.com")
+        Fabricate(:secondary_email, user: staged_user, email: "staged-secondary@example.com")
+
+        get "/admin/users/list.json", params: { query: "staged", show_emails: "true" }
+
+        expect(response.status).to eq(200)
+        listed_user =
+          response.parsed_body.find { |listed_user| listed_user["id"] == staged_user.id }
+        expect(listed_user).to be_present
+        expect(listed_user["email"]).to eq(nil)
+        expect(listed_user["secondary_emails"]).to eq(nil)
+      end
+
+      it "returns users with the same IP as a user" do
+        target_user = Fabricate(:user, ip_address: "42.42.42.42")
+        same_ip_user = Fabricate(:user, ip_address: "42.42.42.42")
+        Fabricate(:user, ip_address: "43.43.43.43")
+
+        get "/admin/users/list.json",
+            params: {
+              same_ip_user_id: target_user.id,
+              exclude: target_user.id,
+              order: "trust_level DESC",
+            }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body.map { |result| result["id"] }).to contain_exactly(
+          same_ip_user.id,
+        )
+      end
+
+      it "does not allow raw IP searches when IP viewing is disabled" do
+        SiteSetting.moderators_view_ips = false
+        user_with_ip = Fabricate(:user, ip_address: "42.42.42.42")
+
+        get "/admin/users/list.json", params: { filter: user_with_ip.ip_address }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body.map { |result| result["id"] }).not_to include(user_with_ip.id)
+      end
+
+      it "ignores raw IP filters when searching by a server-resolved same-IP user" do
+        SiteSetting.moderators_view_ips = false
+        target_user = Fabricate(:user, ip_address: "42.42.42.42")
+        same_ip_user = Fabricate(:user, ip_address: "42.42.42.42")
+        Fabricate(:user, ip_address: "43.43.43.43")
+
+        get "/admin/users/list.json",
+            params: {
+              same_ip_user_id: target_user.id,
+              exclude: target_user.id,
+              filter: "43.43.43.43",
+              ip: "43.43.43.43",
+              order: "trust_level DESC",
+            }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body.map { |result| result["id"] }).to contain_exactly(
+          same_ip_user.id,
+        )
       end
     end
 
@@ -124,6 +262,28 @@ RSpec.describe Admin::UsersController do
         expect(response.parsed_body["silence_reason"]).to eq("because I said so")
       end
 
+      it "does not leak the message body in the public silence_reason" do
+        put "/admin/users/#{user.id}/silence.json",
+            params: {
+              reason: "because I said so",
+              message: "private email body",
+              post_action: "delete",
+              silenced_till: 2.days.from_now,
+            }
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["silence"]["silence_reason"]).to eq("because I said so")
+        expect(response.parsed_body["silence"]["full_silence_reason"]).to eq(
+          "because I said so\n\nprivate email body",
+        )
+
+        get "/admin/users/#{user.id}.json"
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["silence_reason"]).to eq("because I said so")
+        expect(response.parsed_body["full_silence_reason"]).to eq(
+          "because I said so<br><br>private email body",
+        )
+      end
+
       context "with a non-existing user" do
         it "returns 404 error" do
           get "/admin/users/0.json"
@@ -140,6 +300,28 @@ RSpec.describe Admin::UsersController do
 
         expect(response.status).to eq(200)
         expect(response.parsed_body["id"]).to eq(user.id)
+      end
+
+      it "returns SSO details when moderators can view them" do
+        sso_record =
+          Fabricate(:single_sign_on_record, user: user, external_id: "discourse_connect_user")
+        SiteSetting.moderators_view_sso_details = true
+
+        get "/admin/users/#{user.id}.json"
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body.dig("single_sign_on_record", "external_id")).to eq(
+          sso_record.external_id,
+        )
+      end
+
+      it "hides SSO details by default" do
+        Fabricate(:single_sign_on_record, user: user)
+
+        get "/admin/users/#{user.id}.json"
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body).not_to have_key("single_sign_on_record")
       end
 
       it "includes count of similar users" do
@@ -181,6 +363,17 @@ RSpec.describe Admin::UsersController do
       expect(response.status).to eq(200)
       expect(response.parsed_body["users"].map { |u| u["id"] }).to contain_exactly(similar_user.id)
     end
+
+    it "includes penalizability of each similar user" do
+      Fabricate(:user, ip_address: user.ip_address)
+
+      get "/admin/users/#{user.id}/similar-users.json"
+
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["users"]).to all(
+        include("can_be_suspended" => true, "can_be_silenced" => true),
+      )
+    end
   end
 
   describe "#approve" do
@@ -215,6 +408,18 @@ RSpec.describe Admin::UsersController do
             target_user_id: evil_trout.id,
           ).count,
         ).to eq(1)
+      end
+
+      it "approves a user whose previous reviewable was rejected" do
+        evil_trout.update!(active: true)
+        reviewable =
+          Fabricate(:reviewable_user, target: evil_trout, status: Reviewable.statuses[:rejected])
+
+        put "/admin/users/#{evil_trout.id}/approve.json"
+
+        expect(response.status).to eq(200)
+        expect(evil_trout.reload).to be_approved
+        expect(reviewable.reload).to be_approved
       end
     end
 
@@ -265,6 +470,18 @@ RSpec.describe Admin::UsersController do
         expect(response.status).to eq(200)
         evil_trout.reload
         expect(evil_trout.approved).to eq(true)
+      end
+
+      it "approves a user whose previous reviewable was rejected" do
+        evil_trout.update!(active: true)
+        reviewable =
+          Fabricate(:reviewable_user, target: evil_trout, status: Reviewable.statuses[:rejected])
+
+        put "/admin/users/approve-bulk.json", params: { users: [evil_trout.id] }
+
+        expect(response.status).to eq(200)
+        expect(evil_trout.reload).to be_approved
+        expect(reviewable.reload).to be_approved
       end
     end
 
@@ -474,7 +691,7 @@ RSpec.describe Admin::UsersController do
           expect(response.status).to eq(200)
         end
 
-        it "won't delete a category topic" do
+        it "preserves category topics" do
           c = Fabricate(:category_with_definition)
           cat_post = c.topic.posts.first
           put(
@@ -486,7 +703,7 @@ RSpec.describe Admin::UsersController do
           expect(response.status).to eq(200)
         end
 
-        it "won't delete a category topic by replies" do
+        it "preserves category topics when deleting replies" do
           c = Fabricate(:category_with_definition)
           cat_post = c.topic.posts.first
           put(
@@ -602,6 +819,23 @@ RSpec.describe Admin::UsersController do
 
       include_examples "suspension of active user possible"
       include_examples "suspension of staff users"
+
+      it "cannot edit an arbitrary static doc post unrelated to the suspended user" do
+        static_doc_post = Fabricate(:post)
+        SiteSetting.tos_topic_id = static_doc_post.topic_id
+
+        put "/admin/users/#{user.id}/suspend.json",
+            params: {
+              suspend_until: 5.hours.from_now,
+              reason: "reason",
+              post_id: static_doc_post.id,
+              post_action: "edit",
+              post_edit: "edited content",
+            }
+
+        expect(response.status).to eq(200)
+        expect(static_doc_post.reload.raw).not_to eq("edited content")
+      end
     end
 
     context "when logged in as a non-staff user" do
@@ -666,6 +900,32 @@ RSpec.describe Admin::UsersController do
         expect(user).to be_moderator
       end
     end
+
+    context "when logged in as a moderator" do
+      before { sign_in(moderator) }
+
+      it "prevents unsuspending a staff user" do
+        another_admin.update!(suspended_at: DateTime.now, suspended_till: 2.years.from_now)
+        other_moderator =
+          Fabricate(:moderator, suspended_at: DateTime.now, suspended_till: 2.years.from_now)
+
+        put "/admin/users/#{another_admin.id}/unsuspend.json"
+        expect(response.status).to eq(403)
+        expect(another_admin.reload).to be_suspended
+
+        put "/admin/users/#{other_moderator.id}/unsuspend.json"
+        expect(response.status).to eq(403)
+        expect(other_moderator.reload).to be_suspended
+      end
+
+      it "can unsuspend a regular user" do
+        user.update!(suspended_at: DateTime.now, suspended_till: 2.years.from_now)
+
+        put "/admin/users/#{user.id}/unsuspend.json"
+        expect(response.status).to eq(200)
+        expect(user.reload).not_to be_suspended
+      end
+    end
   end
 
   describe "#revoke_admin" do
@@ -683,7 +943,7 @@ RSpec.describe Admin::UsersController do
         expect(response.parsed_body["can_be_merged"]).to eq(true)
         expect(response.parsed_body["can_be_deleted"]).to eq(true)
         expect(response.parsed_body["can_be_anonymized"]).to eq(true)
-        expect(response.parsed_body["can_delete_all_posts"]).to eq(false)
+        expect(response.parsed_body["can_delete_all_posts"]).to eq(true)
       end
     end
 
@@ -1077,6 +1337,33 @@ RSpec.describe Admin::UsersController do
         before { SiteSetting.moderators_change_trust_levels = true }
 
         include_examples "trust level updates possible"
+
+        it "prevents changing or locking a staff user's trust level" do
+          another_admin.update!(trust_level: TrustLevel[4], manual_locked_trust_level: nil)
+
+          put "/admin/users/#{another_admin.id}/trust_level.json", params: { level: TrustLevel[0] }
+
+          trust_level_status = response.status
+          trust_level_errors = response.parsed_body["errors"]
+          trust_level = another_admin.reload.trust_level
+
+          another_admin.update!(trust_level: TrustLevel[4], manual_locked_trust_level: nil)
+
+          put "/admin/users/#{another_admin.id}/trust_level_lock.json", params: { locked: "true" }
+
+          trust_level_lock_status = response.status
+          trust_level_lock_errors = response.parsed_body["errors"] if response.body.present?
+          manual_locked_trust_level = another_admin.reload.manual_locked_trust_level
+
+          aggregate_failures do
+            expect(trust_level_status).to eq(422)
+            expect(trust_level_errors).to be_present
+            expect(trust_level).to eq(TrustLevel[4])
+            expect(trust_level_lock_status).to eq(403)
+            expect(trust_level_lock_errors).to be_present
+            expect(manual_locked_trust_level).to eq(nil)
+          end
+        end
       end
 
       context "when moderators_change_trust_levels setting is disabled" do
@@ -1496,6 +1783,16 @@ RSpec.describe Admin::UsersController do
       before { sign_in(moderator) }
 
       include_examples "user deletion possible"
+
+      it "prevents deleting another moderator" do
+        target_moderator = Fabricate(:moderator)
+
+        delete "/admin/users/#{target_moderator.id}.json"
+
+        expect(User.exists?(target_moderator.id)).to eq(true)
+        expect(response).to be_forbidden
+        expect(response.parsed_body["errors"]).to include(I18n.t("invalid_access"))
+      end
     end
 
     context "when logged in as a non-staff user" do
@@ -1648,6 +1945,98 @@ RSpec.describe Admin::UsersController do
     end
   end
 
+  describe "#suspend_bulk" do
+    fab!(:suspended_users) { Fabricate.times(3, :user) }
+
+    let(:suspend_params) do
+      { user_ids: suspended_users.map(&:id), reason: "spam wave", suspend_until: 1.year.from_now }
+    end
+
+    def suspended_count
+      User.where(id: suspended_users.map(&:id)).where.not(suspended_till: nil).count
+    end
+
+    shared_examples "bulk user suspension possible" do
+      before { sign_in(current_user) }
+
+      it "can suspend multiple users" do
+        put "/admin/users/suspend-bulk.json", params: suspend_params
+        expect(response.status).to eq(200)
+        expect(suspended_count).to eq(3)
+      end
+
+      it "responds with 404 when sending non-existent user ids" do
+        put "/admin/users/suspend-bulk.json",
+            params: {
+              user_ids: [0],
+              reason: "spam wave",
+              suspend_until: 1.year.from_now,
+            }
+        expect(response.status).to eq(404)
+      end
+
+      it "responds with 400 when no reason is provided" do
+        put "/admin/users/suspend-bulk.json",
+            params: {
+              user_ids: suspended_users.map(&:id),
+              suspend_until: 1.year.from_now,
+            }
+        expect(response.status).to eq(400)
+        expect(suspended_count).to eq(0)
+      end
+
+      it "doesn't allow suspending a user that can't be suspended" do
+        suspended_users[0].update!(admin: true)
+
+        put "/admin/users/suspend-bulk.json", params: suspend_params
+        expect(response.status).to eq(403)
+        expect(suspended_count).to eq(0)
+      end
+
+      it "doesn't accept more than 100 user ids" do
+        put "/admin/users/suspend-bulk.json",
+            params: suspend_params.merge(user_ids: suspended_users.map(&:id) + (1..101).to_a)
+        expect(response.status).to eq(400)
+        expect(suspended_count).to eq(0)
+      end
+
+      it "doesn't re-suspend an already-suspended user" do
+        UserSuspender.new(
+          suspended_users[0],
+          suspended_till: 1.year.from_now,
+          reason: "spam",
+          by_user: current_user,
+        ).suspend
+
+        put "/admin/users/suspend-bulk.json", params: suspend_params
+        expect(response.status).to eq(403)
+        expect(suspended_count).to eq(1)
+      end
+    end
+
+    context "when logged in as an admin" do
+      include_examples "bulk user suspension possible" do
+        let(:current_user) { admin }
+      end
+    end
+
+    context "when logged in as a moderator" do
+      include_examples "bulk user suspension possible" do
+        let(:current_user) { moderator }
+      end
+    end
+
+    context "when logged in as a non-staff user" do
+      before { sign_in(user) }
+
+      it "responds with a 404 and doesn't suspend users" do
+        put "/admin/users/suspend-bulk.json", params: suspend_params
+        expect(response.status).to eq(404)
+        expect(suspended_count).to eq(0)
+      end
+    end
+  end
+
   describe "#activate" do
     fab!(:reg_user, :inactive_user)
 
@@ -1661,7 +2050,7 @@ RSpec.describe Admin::UsersController do
         expect(reg_user.active).to eq(true)
       end
 
-      it "should confirm email even when the tokens are expired" do
+      it "confirms email even when the tokens are expired" do
         reg_user.email_tokens.update_all(confirmed: false, expired: true)
 
         reg_user.reload
@@ -1856,7 +2245,7 @@ RSpec.describe Admin::UsersController do
         expect(reg_user).to be_silenced
       end
 
-      it "will set a length of time if provided" do
+      it "sets the provided duration" do
         future_date = 1.month.from_now.to_date
         put "/admin/users/#{reg_user.id}/silence.json",
             params: {
@@ -1870,7 +2259,7 @@ RSpec.describe Admin::UsersController do
         expect(reg_user.silenced_till).to eq(future_date)
       end
 
-      it "will send a message if provided" do
+      it "sends the provided message" do
         expect do
           put "/admin/users/#{reg_user.id}/silence.json",
               params: {
@@ -2046,6 +2435,19 @@ RSpec.describe Admin::UsersController do
       before { sign_in(moderator) }
 
       include_examples "unsilencing user possible"
+
+      it "prevents unsilencing a staff user" do
+        silenced_admin = Fabricate(:admin, silenced_till: 10.years.from_now)
+        silenced_mod = Fabricate(:moderator, silenced_till: 10.years.from_now)
+
+        put "/admin/users/#{silenced_admin.id}/unsilence.json"
+        expect(response.status).to eq(403)
+        expect(silenced_admin.reload).to be_silenced
+
+        put "/admin/users/#{silenced_mod.id}/unsilence.json"
+        expect(response.status).to eq(403)
+        expect(silenced_mod.reload).to be_silenced
+      end
     end
 
     context "when logged in as a non-staff user" do
@@ -2065,7 +2467,7 @@ RSpec.describe Admin::UsersController do
       it "retrieves IP info" do
         ip = "81.2.69.142"
 
-        DiscourseIpInfo.open_db(File.join(Rails.root, "spec", "fixtures", "mmdb"))
+        DiscourseIpInfo.open_db(Rails.root.join("spec/fixtures/mmdb").to_s)
         Resolv::DNS.any_instance.stubs(:getname).with(ip).returns("ip-81-2-69-142.example.com")
 
         get "/admin/users/ip-info.json", params: { ip: ip }
@@ -2088,6 +2490,27 @@ RSpec.describe Admin::UsersController do
       before { sign_in(admin) }
 
       include_examples "IP info retrieval possible"
+
+      it "returns IP info without hostname when reverse DNS is interrupted" do
+        ip = "81.2.69.142"
+
+        DiscourseIpInfo.open_db(Rails.root.join("spec/fixtures/mmdb").to_s)
+        Resolv::DNS.any_instance.stubs(:getname).with(ip).raises(Timeout::Error)
+
+        get "/admin/users/ip-info.json", params: { ip: ip }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body.symbolize_keys).to eq(
+          city: "London",
+          country: "United Kingdom",
+          country_code: "GB",
+          geoname_ids: [6_255_148, 2_635_167, 2_643_743, 6_269_131],
+          location: "London, England, United Kingdom",
+          region: "England",
+          latitude: 51.5142,
+          longitude: -0.0931,
+        )
+      end
     end
 
     context "when logged in as a moderator" do
@@ -2102,7 +2525,7 @@ RSpec.describe Admin::UsersController do
       it "prevents retrieval of IP info with a 404 response" do
         ip = "81.2.69.142"
 
-        DiscourseIpInfo.open_db(File.join(Rails.root, "spec", "fixtures", "mmdb"))
+        DiscourseIpInfo.open_db(Rails.root.join("spec/fixtures/mmdb").to_s)
         Resolv::DNS.any_instance.stubs(:getname).with(ip).returns("ip-81-2-69-142.example.com")
 
         get "/admin/users/ip-info.json", params: { ip: ip }
@@ -2113,21 +2536,90 @@ RSpec.describe Admin::UsersController do
     end
   end
 
+  describe "#total_other_accounts_with_same_ip" do
+    shared_examples "counting other accounts with same ip possible" do
+      it "returns the count for a user" do
+        target_user = Fabricate(:user, ip_address: "42.42.42.42")
+        Fabricate(:user, ip_address: "42.42.42.42")
+        Fabricate(:user, ip_address: "42.42.42.42")
+
+        get "/admin/users/total-others-with-same-ip.json",
+            params: {
+              user_id: target_user.id,
+              exclude: target_user.id,
+              order: "trust_level DESC",
+            }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["total"]).to eq(2)
+      end
+    end
+
+    context "when logged in as an admin" do
+      before { sign_in(admin) }
+
+      include_examples "counting other accounts with same ip possible"
+    end
+
+    context "when logged in as a moderator" do
+      before { sign_in(moderator) }
+
+      include_examples "counting other accounts with same ip possible"
+    end
+
+    context "when logged in as a non-staff user" do
+      before { sign_in(user) }
+
+      it "denies access with a 404 response" do
+        target_user = Fabricate(:user, ip_address: "42.42.42.42")
+
+        get "/admin/users/total-others-with-same-ip.json",
+            params: {
+              user_id: target_user.id,
+              exclude: target_user.id,
+              order: "trust_level DESC",
+            }
+
+        expect(response.status).to eq(404)
+      end
+    end
+  end
+
   describe "#delete_other_accounts_with_same_ip" do
     shared_examples "deleting other accounts with same ip possible" do
-      it "works" do
+      it "deletes other accounts with the same IP while preserving the target user" do
+        target_user = Fabricate(:user, ip_address: "42.42.42.42")
         user_a = Fabricate(:user, ip_address: "42.42.42.42")
         user_b = Fabricate(:user, ip_address: "42.42.42.42")
 
         delete "/admin/users/delete-others-with-same-ip.json",
                params: {
-                 ip: "42.42.42.42",
-                 exclude: -1,
+                 user_id: target_user.id,
+                 exclude: target_user.id,
                  order: "trust_level DESC",
                }
         expect(response.status).to eq(200)
-        expect(User.where(id: user_a.id).count).to eq(0)
-        expect(User.where(id: user_b.id).count).to eq(0)
+        expect(User.exists?(target_user.id)).to eq(true)
+        expect(User.exists?(user_a.id)).to eq(false)
+        expect(User.exists?(user_b.id)).to eq(false)
+      end
+
+      it "does not delete the target user when exclude is tampered with" do
+        target_user = Fabricate(:user, ip_address: "42.42.42.42")
+        other_user = Fabricate(:user, ip_address: "42.42.42.42")
+
+        delete "/admin/users/delete-others-with-same-ip.json",
+               params: {
+                 user_id: target_user.id,
+                 exclude: other_user.id,
+                 filter: target_user.ip_address,
+                 ip: target_user.ip_address,
+                 order: "trust_level DESC",
+               }
+
+        expect(response.status).to eq(200)
+        expect(User.exists?(target_user.id)).to eq(true)
+        expect(User.exists?(other_user.id)).to eq(false)
       end
     end
 
@@ -2141,25 +2633,50 @@ RSpec.describe Admin::UsersController do
       before { sign_in(moderator) }
 
       include_examples "deleting other accounts with same ip possible"
+
+      it "does not reveal the IP address in the staff log context without IP viewing permission" do
+        SiteSetting.moderators_view_ips = false
+        ip_address = "42.42.42.42"
+        target_user = Fabricate(:user, ip_address: ip_address)
+        Fabricate(:user, ip_address: ip_address)
+
+        delete "/admin/users/delete-others-with-same-ip.json",
+               params: {
+                 user_id: target_user.id,
+                 exclude: target_user.id,
+                 order: "trust_level DESC",
+               }
+
+        expect(response.status).to eq(200)
+
+        histories =
+          UserHistory.where(action: UserHistory.actions[:delete_user], acting_user_id: moderator.id)
+        contexts = histories.pluck(:context)
+
+        expect(histories).to be_exists
+        expect(contexts).to all(include(target_user.username))
+        expect(contexts).to all(exclude(ip_address))
+      end
     end
 
     context "when logged in as a non-staff user" do
       before { sign_in(user) }
 
       it "prevents deletion of other accounts with same ip with a 404 response" do
+        target_user = Fabricate(:user, ip_address: "42.42.42.42")
         user_a = Fabricate(:user, ip_address: "42.42.42.42")
         user_b = Fabricate(:user, ip_address: "42.42.42.42")
 
         delete "/admin/users/delete-others-with-same-ip.json",
                params: {
-                 ip: "42.42.42.42",
-                 exclude: -1,
+                 user_id: target_user.id,
+                 exclude: target_user.id,
                  order: "trust_level DESC",
                }
         expect(response.status).to eq(404)
         expect(response.parsed_body["errors"]).to include(I18n.t("not_found"))
-        expect(User.where(id: user_a.id).count).to eq(1)
-        expect(User.where(id: user_b.id).count).to eq(1)
+        expect(User.exists?(user_a.id)).to eq(true)
+        expect(User.exists?(user_b.id)).to eq(true)
       end
     end
   end
@@ -2171,11 +2688,11 @@ RSpec.describe Admin::UsersController do
     before do
       SiteSetting.email_editable = false
       SiteSetting.discourse_connect_url = "https://www.example.com/sso"
+      SiteSetting.discourse_connect_secret = sso_secret
       SiteSetting.enable_discourse_connect = true
       SiteSetting.auth_overrides_email = true
       SiteSetting.auth_overrides_name = true
       SiteSetting.auth_overrides_username = true
-      SiteSetting.discourse_connect_secret = sso_secret
       sso.sso_secret = sso_secret
     end
 
@@ -2219,7 +2736,17 @@ RSpec.describe Admin::UsersController do
         expect(response.status).to eq(200)
       end
 
-      it "should create new users" do
+      it "handles a payload whose base64 contains a '+'" do
+        encoded = Base64.strict_encode64("external_id=1&email=bob@bob.com&username=bob&name=Bob~~~")
+        expect(encoded).to include("+")
+        sig = OpenSSL::HMAC.hexdigest("sha256", sso_secret, encoded)
+
+        post "/admin/users/sync_sso.json", params: { sso: encoded, sig: sig }
+        expect(response.status).to eq(200)
+        expect(User.find_by(username: "bob").name).to eq("Bob~~~")
+      end
+
+      it "creates new users" do
         sso.name = "Dr. Claw"
         sso.username = "dr_claw"
         sso.email = "dr@claw.com"
@@ -2251,7 +2778,7 @@ RSpec.describe Admin::UsersController do
         expect(events).to include(event_name: :sync_sso, params: [user])
       end
 
-      it "should return the right message if the record is invalid" do
+      it "returns an error for an invalid record" do
         sso.email = ""
         sso.name = ""
         sso.external_id = "1"
@@ -2261,7 +2788,7 @@ RSpec.describe Admin::UsersController do
         expect(response.parsed_body["message"]).to include("Primary email can't be blank")
       end
 
-      it "should return the right message if the signature is invalid" do
+      it "returns an error for an invalid signature" do
         sso.name = "Dr. Claw"
         sso.username = "dr_claw"
         sso.email = "dr@claw.com"
@@ -2284,6 +2811,18 @@ RSpec.describe Admin::UsersController do
         expect(response.status).to eq(422)
         expect(response.parsed_body["message"]).to include(
           I18n.t("discourse_connect.blank_id_error"),
+        )
+      end
+
+      it "returns the right message if the external id is banned" do
+        sso.name = "Dr. Claw"
+        sso.username = "dr_claw"
+        sso.email = "dr@claw.com"
+        sso.external_id = "none"
+        post "/admin/users/sync_sso.json", params: Rack::Utils.parse_query(sso.payload)
+        expect(response.status).to eq(422)
+        expect(response.parsed_body["message"]).to include(
+          I18n.t("discourse_connect.banned_id_error"),
         )
       end
     end
@@ -2343,7 +2882,7 @@ RSpec.describe Admin::UsersController do
         expect(user.reload.user_second_factors.totps.first).to eq(second_factor)
       end
 
-      it "should able to disable the second factor for another user" do
+      it "disables second factor for another user" do
         expect do put "/admin/users/#{user.id}/disable_second_factor.json" end.to change {
           Jobs::CriticalUserEmail.jobs.length
         }.by(1)
@@ -2358,21 +2897,22 @@ RSpec.describe Admin::UsersController do
         expect(job_args["type"]).to eq("account_second_factor_disabled")
       end
 
-      it "should not be able to disable the second factor for the current user" do
+      it "rejects disabling second factor for the current user" do
         put "/admin/users/#{admin.id}/disable_second_factor.json"
 
         expect(response.status).to eq(403)
       end
 
       describe "when user has only one second factor type enabled" do
-        it "should succeed with security keys" do
+        it "disables security key authentication" do
           user.user_second_factors.destroy_all
 
           put "/admin/users/#{user.id}/disable_second_factor.json"
 
           expect(response.status).to eq(200)
         end
-        it "should succeed with totp" do
+
+        it "disables TOTP authentication" do
           user.security_keys.destroy_all
 
           put "/admin/users/#{user.id}/disable_second_factor.json"
@@ -2382,7 +2922,7 @@ RSpec.describe Admin::UsersController do
       end
 
       describe "when user does not have second factor enabled" do
-        it "should raise the right error" do
+        it "returns 400 when second factor is not enabled" do
           user.user_second_factors.destroy_all
           user.security_keys.destroy_all
 
@@ -2482,7 +3022,7 @@ RSpec.describe Admin::UsersController do
   describe "#delete_posts_batch" do
     shared_examples "post batch deletion possible" do
       context "when user is is invalid" do
-        it "should return the right response" do
+        it "returns 404 for an invalid user" do
           put "/admin/users/nothing/delete_posts_batch.json"
 
           expect(response.status).to eq(404)
@@ -2522,6 +3062,15 @@ RSpec.describe Admin::UsersController do
       before { sign_in(moderator) }
 
       include_examples "post batch deletion possible"
+
+      context "when target user is another moderator" do
+        fab!(:target_moderator, :moderator)
+
+        it "denies access with a 403 response" do
+          put "/admin/users/#{target_moderator.id}/delete_posts_batch.json"
+          expect(response.status).to eq(403)
+        end
+      end
     end
 
     context "when logged in as a non-staff user" do
@@ -2540,6 +3089,7 @@ RSpec.describe Admin::UsersController do
   describe "#delete_posts_decider" do
     shared_examples "delete_posts_decider accessible" do |acting_user_role|
       let(:acting_user) { send(acting_user_role) }
+
       context "when user exists" do
         fab!(:target_user, :user)
 
@@ -2599,12 +3149,23 @@ RSpec.describe Admin::UsersController do
 
     context "when logged in as an admin" do
       before { sign_in(admin) }
+
       include_examples "delete_posts_decider accessible", :admin
     end
 
     context "when logged in as a moderator" do
       before { sign_in(moderator) }
+
       include_examples "delete_posts_decider accessible", :moderator
+
+      context "when target user is another moderator" do
+        fab!(:target_moderator, :moderator)
+
+        it "denies access with a 403 response" do
+          post "/admin/users/#{target_moderator.id}/delete_posts_decider.json"
+          expect(response.status).to eq(403)
+        end
+      end
 
       context "when user has too many posts to delete" do
         fab!(:target_user) do
@@ -2643,7 +3204,7 @@ RSpec.describe Admin::UsersController do
     context "when logged in as an admin" do
       before { sign_in(admin) }
 
-      it "should merge source user to target user" do
+      it "merges the source user into the target user" do
         Jobs.run_immediately!
         post "/admin/users/#{user.id}/merge.json", params: { target_username: target_user.username }
 
@@ -2696,6 +3257,7 @@ RSpec.describe Admin::UsersController do
 
     before do
       SiteSetting.discourse_connect_url = "https://www.example.com/sso"
+      SiteSetting.discourse_connect_secret = "x" * 10
       SiteSetting.enable_discourse_connect = true
     end
 
@@ -2792,7 +3354,7 @@ RSpec.describe Admin::UsersController do
 
   describe "#anonymize" do
     shared_examples "user anonymization possible" do
-      it "will make the user anonymous" do
+      it "anonymizes the user" do
         put "/admin/users/#{user.id}/anonymize.json"
         expect(response.status).to eq(200)
         expect(response.parsed_body["username"]).to be_present
@@ -2839,7 +3401,7 @@ RSpec.describe Admin::UsersController do
     context "when logged in as a moderator" do
       before { sign_in(moderator) }
 
-      it "will reset the bounce score" do
+      it "resets the bounce score" do
         post "/admin/users/#{user.id}/reset-bounce-score.json"
 
         expect(response.status).to eq(200)

@@ -1,18 +1,18 @@
-import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
 import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import { modifier as modifierFn } from "ember-modifier";
-import DButton from "discourse/components/d-button";
-import concatClass from "discourse/helpers/concat-class";
+import FKBaseControl from "discourse/form-kit/components/fk/control/base";
 import { eq } from "discourse/truth-helpers";
+import DButton from "discourse/ui-kit/d-button";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
 
 const TYPES = {
   text: "text",
   password: "password",
 };
 
-export default class FKControlInput extends Component {
+export default class FKControlPassword extends FKBaseControl {
   static controlType = "password";
 
   @tracked type = TYPES.password;
@@ -41,7 +41,7 @@ export default class FKControlInput extends Component {
 
   @action
   handleInput(event) {
-    const value = event.target.value === "" ? undefined : event.target.value;
+    const value = event.target.value === "" ? null : event.target.value;
     this.args.field.set(value);
   }
 
@@ -52,27 +52,33 @@ export default class FKControlInput extends Component {
 
   <template>
     <div
-      class={{concatClass
+      class={{dConcatClass
         "form-kit__control-password-wrapper"
         (if this.isFocused "is-focused")
       }}
     >
       <input
-        type={{this.type}}
-        value={{@field.value}}
+        aria-describedby={{@field.describedBy}}
+        aria-invalid={{if @field.error "true"}}
+        autocomplete="new-password"
         class="form-kit__control-password"
         disabled={{@field.disabled}}
+        id={{@field.id}}
+        name={{@field.name}}
+        placeholder={{@field.placeholder}}
+        type={{this.type}}
+        value={{@field.value}}
         ...attributes
         {{on "input" this.handleInput}}
         {{this.focusState}}
       />
 
       <DButton
+        aria-checked={{eq this.type TYPES.text}}
         class="btn-transparent form-kit__control-password-toggle"
+        role="switch"
         @action={{this.toggleVisibility}}
         @icon={{this.iconForType}}
-        role="switch"
-        aria-checked={{eq this.type TYPES.text}}
       />
     </div>
   </template>

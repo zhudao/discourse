@@ -45,15 +45,6 @@ acceptance("Email Disabled Banner - no SMTP configured", function (needs) {
     assert.dom(".alert-emails-disabled").doesNotExist();
   });
 
-  test("shows on email-related routes when no SMTP", async function (assert) {
-    this.siteSettings.disable_emails = "no";
-    await visit("/login");
-    assert.dom(".alert-emails-disabled").exists();
-    assert
-      .dom(".alert-emails-disabled .text")
-      .hasText(i18n("emails_are_disabled_no_smtp"));
-  });
-
   test("disable_emails setting takes precedence and shows globally", async function (assert) {
     this.siteSettings.disable_emails = "yes";
     await visit("/latest");
@@ -70,3 +61,38 @@ acceptance("Email Disabled Banner - no SMTP configured", function (needs) {
     assert.dom(".alert-emails-disabled").exists();
   });
 });
+
+acceptance(
+  "Email Disabled Banner - anonymous with no SMTP configured",
+  function (needs) {
+    needs.site({ email_configured: false });
+
+    test("shows on email-related routes when no SMTP", async function (assert) {
+      this.siteSettings.disable_emails = "no";
+      await visit("/login");
+
+      assert
+        .dom(".alert-emails-disabled")
+        .exists("the missing SMTP banner is shown");
+      assert
+        .dom(".alert-emails-disabled .text")
+        .hasText(
+          i18n("emails_are_disabled_no_smtp"),
+          "explains that SMTP is not configured"
+        );
+    });
+  }
+);
+
+acceptance(
+  "Email Disabled Banner - email_configured absent from site data",
+  function (needs) {
+    needs.site({});
+
+    test("no banner when email_configured is absent", async function (assert) {
+      this.siteSettings.disable_emails = "no";
+      await visit("/login");
+      assert.dom(".alert-emails-disabled").doesNotExist();
+    });
+  }
+);

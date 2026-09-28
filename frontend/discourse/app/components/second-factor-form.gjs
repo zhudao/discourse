@@ -1,58 +1,61 @@
 /* eslint-disable ember/no-classic-components */
 import Component from "@ember/component";
 import { on } from "@ember/modifier";
-import { action } from "@ember/object";
-import { htmlSafe } from "@ember/template";
+import { action, computed } from "@ember/object";
+import { trustHTML } from "@ember/template";
 import { tagName } from "@ember-decorators/component";
-import discourseComputed from "discourse/lib/decorators";
 import { SECOND_FACTOR_METHODS } from "discourse/models/user";
 import { i18n } from "discourse-i18n";
 
 @tagName("")
 export default class SecondFactorForm extends Component {
-  @discourseComputed("secondFactorMethod")
-  secondFactorTitle(secondFactorMethod) {
-    switch (secondFactorMethod) {
+  @computed("secondFactorMethod")
+  get secondFactorTitle() {
+    switch (this.secondFactorMethod) {
       case SECOND_FACTOR_METHODS.TOTP:
         return i18n("login.second_factor_title");
       case SECOND_FACTOR_METHODS.SECURITY_KEY:
+        return i18n("login.second_factor_title");
+      case SECOND_FACTOR_METHODS.PASSKEY:
         return i18n("login.second_factor_title");
       case SECOND_FACTOR_METHODS.BACKUP_CODE:
         return i18n("login.second_factor_backup_title");
     }
   }
 
-  @discourseComputed("secondFactorMethod")
-  secondFactorDescription(secondFactorMethod) {
-    switch (secondFactorMethod) {
+  @computed("secondFactorMethod")
+  get secondFactorDescription() {
+    switch (this.secondFactorMethod) {
       case SECOND_FACTOR_METHODS.TOTP:
         return i18n("login.second_factor_description");
       case SECOND_FACTOR_METHODS.SECURITY_KEY:
         return i18n("login.security_key_description");
+      case SECOND_FACTOR_METHODS.PASSKEY:
+        return i18n("login.passkey_2fa_description");
       case SECOND_FACTOR_METHODS.BACKUP_CODE:
         return i18n("login.second_factor_backup_description");
     }
   }
 
-  @discourseComputed("secondFactorMethod", "isLogin")
-  linkText(secondFactorMethod, isLogin) {
-    if (isLogin) {
-      return secondFactorMethod === SECOND_FACTOR_METHODS.TOTP
+  @computed("secondFactorMethod", "isLogin")
+  get linkText() {
+    if (this.isLogin) {
+      return this.secondFactorMethod === SECOND_FACTOR_METHODS.TOTP
         ? "login.second_factor_backup"
         : "login.second_factor";
     } else {
-      return secondFactorMethod === SECOND_FACTOR_METHODS.TOTP
+      return this.secondFactorMethod === SECOND_FACTOR_METHODS.TOTP
         ? "user.second_factor_backup.use"
         : "user.second_factor.use";
     }
   }
 
-  @discourseComputed("backupEnabled", "totpEnabled", "secondFactorMethod")
-  showToggleMethodLink(backupEnabled, totpEnabled, secondFactorMethod) {
+  @computed("backupEnabled", "totpEnabled", "secondFactorMethod")
+  get showToggleMethodLink() {
     return (
-      backupEnabled &&
-      totpEnabled &&
-      secondFactorMethod !== SECOND_FACTOR_METHODS.SECURITY_KEY
+      this.backupEnabled &&
+      this.totpEnabled &&
+      this.secondFactorMethod !== SECOND_FACTOR_METHODS.SECURITY_KEY
     );
   }
 
@@ -73,7 +76,7 @@ export default class SecondFactorForm extends Component {
       <h3>{{this.secondFactorTitle}}</h3>
 
       {{#if this.optionalText}}
-        <p>{{htmlSafe this.optionalText}}</p>
+        <p>{{trustHTML this.optionalText}}</p>
       {{/if}}
 
       <p class="second-factor__description">{{this.secondFactorDescription}}</p>
@@ -83,8 +86,8 @@ export default class SecondFactorForm extends Component {
       {{#if this.showToggleMethodLink}}
         <p>
           <a
-            href
             class="toggle-second-factor-method"
+            href
             {{on "click" this.toggleSecondFactorMethod}}
           >{{i18n this.linkText}}</a>
         </p>

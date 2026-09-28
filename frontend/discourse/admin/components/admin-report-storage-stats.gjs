@@ -1,51 +1,66 @@
 /* eslint-disable ember/no-classic-components */
 import Component from "@ember/component";
-import { alias } from "@ember/object/computed";
-import { htmlSafe } from "@ember/template";
+import { computed, set } from "@ember/object";
+import { trustHTML } from "@ember/template";
 import { tagName } from "@ember-decorators/component";
-import icon from "discourse/helpers/d-icon";
-import formatDate from "discourse/helpers/format-date";
-import { setting } from "discourse/lib/computed";
-import discourseComputed from "discourse/lib/decorators";
 import getUrl from "discourse/lib/get-url";
+import dFormatDate from "discourse/ui-kit/helpers/d-format-date";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
 import I18n, { i18n } from "discourse-i18n";
 
 @tagName("")
 export default class AdminReportStorageStats extends Component {
-  @setting("backup_location") backupLocation;
-
-  @alias("model.data.backups") backupStats;
-
-  @alias("model.data.uploads") uploadStats;
-
-  @discourseComputed("backupStats")
-  showBackupStats(stats) {
-    return stats && this.currentUser.admin;
+  @computed("model.data.backups")
+  get backupStats() {
+    return this.model?.data?.backups;
   }
 
-  @discourseComputed("backupLocation")
-  backupLocationName(backupLocation) {
-    return i18n(`admin.backups.location.${backupLocation}`);
+  set backupStats(value) {
+    set(this, "model.data.backups", value);
   }
 
-  @discourseComputed("backupStats.used_bytes")
-  usedBackupSpace(bytes) {
-    return I18n.toHumanSize(bytes);
+  @computed("model.data.uploads")
+  get uploadStats() {
+    return this.model?.data?.uploads;
   }
 
-  @discourseComputed("backupStats.free_bytes")
-  freeBackupSpace(bytes) {
-    return I18n.toHumanSize(bytes);
+  set uploadStats(value) {
+    set(this, "model.data.uploads", value);
   }
 
-  @discourseComputed("uploadStats.used_bytes")
-  usedUploadSpace(bytes) {
-    return I18n.toHumanSize(bytes);
+  @computed("siteSettings.backup_location")
+  get backupLocation() {
+    return this.siteSettings.backup_location;
   }
 
-  @discourseComputed("uploadStats.free_bytes")
-  freeUploadSpace(bytes) {
-    return I18n.toHumanSize(bytes);
+  @computed("backupStats")
+  get showBackupStats() {
+    return this.backupStats && this.currentUser.admin;
+  }
+
+  @computed("backupLocation")
+  get backupLocationName() {
+    return i18n(`admin.backups.location.${this.backupLocation}`);
+  }
+
+  @computed("backupStats.used_bytes")
+  get usedBackupSpace() {
+    return I18n.toHumanSize(this.backupStats?.used_bytes);
+  }
+
+  @computed("backupStats.free_bytes")
+  get freeBackupSpace() {
+    return I18n.toHumanSize(this.backupStats?.free_bytes);
+  }
+
+  @computed("uploadStats.used_bytes")
+  get usedUploadSpace() {
+    return I18n.toHumanSize(this.uploadStats?.used_bytes);
+  }
+
+  @computed("uploadStats.free_bytes")
+  get freeUploadSpace() {
+    return I18n.toHumanSize(this.uploadStats?.free_bytes);
   }
 
   <template>
@@ -53,7 +68,7 @@ export default class AdminReportStorageStats extends Component {
       {{#if this.showBackupStats}}
         <div class="backups">
           <h3 class="storage-stats-title">
-            <a href={{getUrl "/admin/backups"}}>{{icon "box-archive"}}
+            <a href={{getUrl "/admin/backups"}}>{{dIcon "box-archive"}}
               {{i18n "admin.dashboard.backups"}}</a>
           </h3>
           <p>
@@ -79,10 +94,10 @@ export default class AdminReportStorageStats extends Component {
 
             {{#if this.backupStats.last_backup_taken_at}}
               <br />
-              {{htmlSafe
+              {{trustHTML
                 (i18n
                   "admin.dashboard.lastest_backup"
-                  date=(formatDate
+                  date=(dFormatDate
                     this.backupStats.last_backup_taken_at leaveAgo="true"
                   )
                 )
@@ -93,7 +108,7 @@ export default class AdminReportStorageStats extends Component {
       {{/if}}
 
       <div class="uploads">
-        <h3 class="storage-stats-title">{{icon "upload"}}
+        <h3 class="storage-stats-title">{{dIcon "upload"}}
           {{i18n "admin.dashboard.uploads"}}</h3>
         <p>
           {{#if this.uploadStats.free_bytes}}

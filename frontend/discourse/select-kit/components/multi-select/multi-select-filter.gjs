@@ -1,21 +1,20 @@
 import { Input } from "@ember/component";
 import { on } from "@ember/modifier";
-import { action } from "@ember/object";
+import { action, computed } from "@ember/object";
 import { isEmpty } from "@ember/utils";
 import { classNames } from "@ember-decorators/component";
-import icon from "discourse/helpers/d-icon";
-import discourseComputed from "discourse/lib/decorators";
 import SelectKitFilterComponent from "discourse/select-kit/components/select-kit/select-kit-filter";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
 
 @classNames("multi-select-filter")
 export default class MultiSelectFilter extends SelectKitFilterComponent {
-  @discourseComputed("placeholder", "selectKit.hasSelection")
-  computedPlaceholder(placeholder, hasSelection) {
-    if (this.hidePlaceholderWithSelection && hasSelection) {
+  @computed("placeholder", "selectKit.hasSelection")
+  get computedPlaceholder() {
+    if (this.hidePlaceholderWithSelection && this.selectKit?.hasSelection) {
       return "";
     }
 
-    return isEmpty(placeholder) ? "" : placeholder;
+    return isEmpty(this.placeholder) ? "" : this.placeholder;
   }
 
   @action
@@ -41,19 +40,18 @@ export default class MultiSelectFilter extends SelectKitFilterComponent {
   <template>
     {{#unless this.isHidden}}
       {{! filter-input-search prevents 1password from attempting autocomplete }}
-      {{! template-lint-disable no-pointer-down-event-binding }}
 
       <Input
-        tabindex={{0}}
-        class="filter-input"
-        placeholder={{this.computedPlaceholder}}
+        autocapitalize="off"
         autocomplete="off"
         autocorrect="off"
-        autocapitalize="off"
+        class="filter-input"
         name="filter-input-search"
+        placeholder={{this.computedPlaceholder}}
         spellcheck={{false}}
-        @value={{readonly this.selectKit.filter}}
+        tabindex={{0}}
         @type="search"
+        @value={{readonly this.selectKit.filter}}
         {{on "paste" this.onPaste}}
         {{on "keydown" this.onKeydown}}
         {{on "keyup" this.onKeyup}}
@@ -61,7 +59,7 @@ export default class MultiSelectFilter extends SelectKitFilterComponent {
       />
 
       {{#if this.selectKit.options.filterIcon}}
-        {{icon this.selectKit.options.filterIcon class="filter-icon"}}
+        {{dIcon this.selectKit.options.filterIcon class="filter-icon"}}
       {{/if}}
     {{/unless}}
   </template>

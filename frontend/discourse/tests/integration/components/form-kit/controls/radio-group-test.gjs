@@ -15,13 +15,13 @@ module(
 
       await render(
         <template>
-          <Form @onSubmit={{mutateData}} @data={{data}} as |form|>
-            <form.Field @name="foo" @title="Foo" as |field|>
-              <field.RadioGroup as |RadioGroup|>
+          <Form @data={{data}} @onSubmit={{mutateData}} as |form|>
+            <form.Field @name="foo" @title="Foo" @type="radio-group" as |field|>
+              <field.Control as |RadioGroup|>
                 <RadioGroup.Radio @value="one">One</RadioGroup.Radio>
                 <RadioGroup.Radio @value="two">Two</RadioGroup.Radio>
                 <RadioGroup.Radio @value="three">Three</RadioGroup.Radio>
-              </field.RadioGroup>
+              </field.Control>
             </form.Field>
           </Form>
         </template>
@@ -36,6 +36,27 @@ module(
       await formKit().submit();
 
       assert.deepEqual(data.foo, "two");
+    });
+
+    test("@title and @description", async function (assert) {
+      await render(
+        <template>
+          <Form as |form|>
+            <form.Field @name="foo" @title="Foo" @type="radio-group" as |field|>
+              <field.Control
+                @description="Choose carefully"
+                @title="Pick one"
+                as |RadioGroup|
+              >
+                <RadioGroup.Radio @value="one">One</RadioGroup.Radio>
+              </field.Control>
+            </form.Field>
+          </Form>
+        </template>
+      );
+
+      assert.dom(".form-kit__fieldset-title").hasText("Pick one");
+      assert.dom(".form-kit__fieldset-description").hasText("Choose carefully");
     });
   }
 );

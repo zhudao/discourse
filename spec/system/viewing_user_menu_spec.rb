@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-RSpec.describe "Viewing User Menu", system: true do
+RSpec.describe "Viewing User Menu" do
   fab!(:user)
 
   let(:user_menu) { PageObjects::Components::UserMenu.new }
@@ -24,10 +24,48 @@ RSpec.describe "Viewing User Menu", system: true do
     end
   end
 
+  describe "when clicking a notification in the bookmarks tab" do
+    fab!(:post)
+    fab!(:bookmark) { Fabricate(:bookmark, user: user, bookmarkable: post) }
+    fab!(:bookmark_reminder) do
+      Fabricate(
+        :notification,
+        user: user,
+        topic: post.topic,
+        post_number: post.post_number,
+        notification_type: Notification.types[:bookmark_reminder],
+        data: {
+          bookmark_id: bookmark.id,
+          bookmarkable_type: bookmark.bookmarkable_type,
+          bookmarkable_id: bookmark.bookmarkable_id,
+          title: post.topic.title,
+          bookmark_name: "reminder",
+        }.to_json,
+      )
+    end
+
+    it "does not raise a JS error on click" do
+      sign_in(user)
+      visit("/latest")
+
+      page_errors = []
+      page.driver.with_playwright_page do |pw_page|
+        pw_page.on("pageerror", ->(error) { page_errors << error.message })
+      end
+
+      user_menu.open
+      user_menu.click_bookmarks_tab
+      find("#quick-access-bookmarks li.bookmark-reminder a").click
+
+      expect(page).to have_current_path(%r{/t/})
+      expect(page_errors).to be_empty
+    end
+  end
+
   describe "when viewing replies notifications tab" do
     fab!(:topic)
 
-    it "should display group mentioned notifications in the tab" do
+    it "shows group-mention notifications in the tab" do
       Jobs.run_immediately!
 
       mentionable_group = Fabricate(:group, mentionable_level: Group::ALIAS_LEVELS[:everyone])
@@ -52,7 +90,7 @@ RSpec.describe "Viewing User Menu", system: true do
     context "with SiteSetting.prioritize_full_name_in_ux=true" do
       before { SiteSetting.prioritize_full_name_in_ux = true }
 
-      it "should display user full name in mention notifications" do
+      it "shows the user's full name in mention notifications" do
         Jobs.run_immediately!
 
         user = Fabricate(:user)
@@ -72,7 +110,7 @@ RSpec.describe "Viewing User Menu", system: true do
         expect(user_menu).to have_user_full_name_mentioned_notification(topic, user)
       end
 
-      it "should display user full name in message notification" do
+      it "shows the user's full name in message notifications" do
         Jobs.run_immediately!
 
         user = Fabricate(:moderator)
@@ -94,7 +132,7 @@ RSpec.describe "Viewing User Menu", system: true do
         expect(user_menu).to have_user_full_name_messaged_notification(post, user)
       end
 
-      it "should display user full name in bookmark notification" do
+      it "shows the user's full name in bookmark notifications" do
         Jobs.run_immediately!
 
         user = Fabricate(:moderator)
@@ -120,7 +158,7 @@ RSpec.describe "Viewing User Menu", system: true do
     context "with SiteSetting.prioritize_full_name_in_ux=false" do
       before { SiteSetting.prioritize_full_name_in_ux = false }
 
-      it "should display only username in mention notifications" do
+      it "shows only the username in mention notifications" do
         Jobs.run_immediately!
 
         SiteSetting.prioritize_username_in_ux = true

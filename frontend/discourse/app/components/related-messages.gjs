@@ -1,7 +1,7 @@
 import Component from "@glimmer/component";
 import { cached } from "@glimmer/tracking";
 import { service } from "@ember/service";
-import { htmlSafe } from "@ember/template";
+import { trustHTML } from "@ember/template";
 import BasicTopicList from "discourse/components/basic-topic-list";
 import getURL from "discourse/lib/get-url";
 import { i18n } from "discourse-i18n";
@@ -39,27 +39,27 @@ export default class RelatedMessages extends Component {
 
   <template>
     <div
-      role="complementary"
       aria-labelledby="related-messages-title"
-      id="related-messages"
       class="more-topics__list"
+      id="related-messages"
+      role="complementary"
     >
-      <h3 id="related-messages-title" class="more-topics__list-title">
+      <h3 class="more-topics__list-title" id="related-messages-title">
         {{i18n "related_messages.title"}}
       </h3>
 
       <div class="topics">
         <BasicTopicList
-          @topics={{@topic.relatedMessages}}
           @hideCategory={{true}}
-          @showPosters={{true}}
           @listContext="related"
+          @showPosters={{true}}
+          @topics={{@topic.relatedMessages}}
         />
       </div>
 
       {{#if this.targetUser}}
         <h3 class="see-all-pms-message">
-          {{htmlSafe
+          {{trustHTML
             (i18n
               "related_messages.see_all"
               path=this.searchLink

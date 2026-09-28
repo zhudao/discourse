@@ -17,7 +17,11 @@ class FlaggedUserSerializer < BasicUserSerializer
              :trust_level,
              :silenced_count,
              :suspended_count,
-             :rejected_posts_count
+             :rejected_posts_count,
+             :silenced_till,
+             :silence_reason,
+             :suspended_till,
+             :suspend_reason
 
   def can_delete_all_posts
     scope.can_delete_all_posts?(object)
@@ -29,6 +33,10 @@ class FlaggedUserSerializer < BasicUserSerializer
 
   def ip_address
     object.ip_address.try(:to_s)
+  end
+
+  def include_ip_address?
+    scope.can_see_ip?
   end
 
   def flags_agreed
@@ -44,15 +52,15 @@ class FlaggedUserSerializer < BasicUserSerializer
   end
 
   def silenced_count
-    object.number_of_silencings.to_i
+    object.number_of_silencings
   end
 
   def suspended_count
-    object.number_of_suspensions.to_i
+    object.number_of_suspensions
   end
 
   def rejected_posts_count
-    object.number_of_rejected_posts.to_i
+    object.number_of_rejected_posts
   end
 
   def custom_fields
@@ -66,5 +74,21 @@ class FlaggedUserSerializer < BasicUserSerializer
 
   def include_email?
     scope.can_check_emails?(scope.user)
+  end
+
+  def include_silenced_till?
+    object.silenced?
+  end
+
+  def include_silence_reason?
+    object.silenced? && object.silence_reason.present?
+  end
+
+  def include_suspended_till?
+    object.suspended?
+  end
+
+  def include_suspend_reason?
+    object.suspended? && object.suspend_reason.present?
   end
 end

@@ -1,8 +1,12 @@
 import Component from "@glimmer/component";
+import { cached } from "@glimmer/tracking";
 import { action } from "@ember/object";
+import { getOwner } from "@ember/owner";
+import curryComponent from "ember-curry-component";
+import { resolveFieldControl } from "discourse/form-kit/lib/field-control";
 import ValidationParser from "discourse/form-kit/lib/validation-parser";
 import Validator from "discourse/form-kit/lib/validator";
-import uniqueId from "discourse/helpers/unique-id";
+import dUniqueId from "discourse/ui-kit/helpers/d-unique-id";
 
 /**
  * Represents a field in a form with validation, registration, and field data management capabilities.
@@ -12,13 +16,19 @@ export default class FKFieldData extends Component {
    * Unique identifier for the field.
    * @type {string}
    */
-  id = uniqueId();
+  id = dUniqueId();
 
   /**
    * Unique identifier for the field's error element.
    * @type {string}
    */
-  errorId = uniqueId();
+  errorId = dUniqueId();
+
+  #controlArgs = { field: this };
+
+  // Set by legacy controls in their constructor (during render),
+  // read by the applyControlType modifier (post-render)
+  _legacyControlType;
 
   /**
    * Initializes the FKFieldData component.
@@ -31,6 +41,14 @@ export default class FKFieldData extends Component {
     if (!this.args.title?.toString?.()?.length) {
       throw new Error("@title is required on `<form.Field />`.");
     }
+  }
+
+  get type() {
+    return this.args.type ?? this._legacyControlType;
+  }
+
+  set type(value) {
+    this._legacyControlType = value;
   }
 
   /**
@@ -52,34 +70,28 @@ export default class FKFieldData extends Component {
   }
 
   /**
-   * Updates the value of the field and triggers revalidation.
-   * @param {any} value - The new value for the field.
-   * @returns {Promise<void>}
-   */
-  @action
-  async set(value) {
-    if (this.args.onSet) {
-      await this.args.onSet(value, {
-        set: this.args.set,
-        name: this.name,
-        parentName: this.args.parentName,
-        index: this.args.collectionIndex,
-      });
-    } else {
-      await this.args.set(this.name, value, {
-        index: this.args.collectionIndex,
-      });
-    }
-
-    this.args.triggerRevalidationFor(this.name);
-  }
-
-  /**
    * Title of the field.
    * @type {string}
    */
   get title() {
     return this.args.title;
+  }
+
+  get hasExplicitType() {
+    return this.args.type !== undefined;
+  }
+
+  /**
+   * Contextual component for the control set by `@type`.
+   * @type {Component}
+   */
+  @cached
+  get Control() {
+    return curryComponent(
+      resolveFieldControl(this.type, getOwner(this)),
+      this.#controlArgs,
+      getOwner(this)
+    );
   }
 
   /**
@@ -91,19 +103,13 @@ export default class FKFieldData extends Component {
   }
 
   /**
-   * Format of the title.
+   * Format of the title and description (label area). Overrides @format
+   * for the title and description, leaving the field's content area at
+   * @format. Useful when long descriptions need more room than the input.
    * @type {string}
    */
-  get titleFormat() {
-    return this.args.titleFormat;
-  }
-
-  /**
-   * Format of the description.
-   * @type {string}
-   */
-  get descriptionFormat() {
-    return this.args.descriptionFormat;
+  get labelFormat() {
+    return this.args.labelFormat;
   }
 
   /**
@@ -132,6 +138,14 @@ export default class FKFieldData extends Component {
   }
 
   /**
+   * Placeholder text for input fields.
+   * @type {string}
+   */
+  get placeholder() {
+    return this.args.placeholder;
+  }
+
+  /**
    * Help text of the field.
    * @type {string}
    */
@@ -139,13 +153,63 @@ export default class FKFieldData extends Component {
     return this.args.helpText;
   }
 
+  get error() {
+    return (this.args.errors ?? {})[this.name];
+  }
+
+  get descriptionId() {
+    return `${this.id}-description`;
+  }
+
+  get helpTextId() {
+    return `${this.id}-help-text`;
+  }
+
+  get describedBy() {
+    const ids = [];
+
+    if (this.description) {
+      ids.push(this.descriptionId);
+    }
+
+    if (this.helpText) {
+      ids.push(this.helpTextId);
+    }
+
+    if (this.error) {
+      ids.push(this.errorId);
+    }
+
+    return ids.length ? ids.join(" ") : undefined;
+  }
+
   /**
-   * Indicates whether to show the field's title.
-   * Defaults to `true`.
+   * Indicates whether to show the title rendered by the field container.
+   * Has no effect on controls that render the title themselves; see
+   * `showControlTitle`. Defaults to `true`.
    * @type {boolean}
    */
   get showTitle() {
     return this.args.showTitle ?? true;
+  }
+
+  /**
+   * Indicates whether a control that renders the field's title itself, inline
+   * in its own markup, should render it. Defaults to `true`.
+   * @type {boolean}
+   */
+  get showControlTitle() {
+    return this.args.showControlTitle ?? true;
+  }
+
+  /**
+   * Indicates whether to show the `(optional)` marker next to the title when
+   * the field has no `required` validation rule.
+   * Defaults to `true`.
+   * @type {boolean}
+   */
+  get showOptional() {
+    return this.args.showOptional ?? true;
   }
 
   /**
@@ -177,6 +241,10 @@ export default class FKFieldData extends Component {
     }
 
     return name;
+  }
+
+  get normalizedName() {
+    return this.name.replace(/\./g, "-");
   }
 
   /**
@@ -226,13 +294,38 @@ export default class FKFieldData extends Component {
   }
 
   /**
+   * Updates the value of the field and triggers revalidation.
+   * @param {any} value - The new value for the field.
+   * @returns {Promise<void>}
+   */
+  @action
+  async set(value) {
+    if (this.args.onSet) {
+      await this.args.onSet(value, {
+        set: this.args.set,
+        name: this.name,
+        parentName: this.args.parentName,
+        index: this.args.collectionIndex,
+      });
+    } else {
+      await this.args.set(this.name, value, {
+        index: this.args.collectionIndex,
+      });
+    }
+
+    this.args.triggerRevalidationFor(this.name);
+  }
+
+  /**
    * Validates the field value.
    * @param {string} name - The name of the field.
    * @param {any} value - The value of the field.
    * @param {Object} data - Additional data for validation.
-   * @returns {Promise<Object>} The validation errors.
+   * @param {Object} context - Additional validation handlers.
+   * @param {Function} context.preventSubmit - Prevents the current submission.
+   * @returns {Promise<void>}
    */
-  async validate(name, value, data) {
+  async validate(name, value, data, { preventSubmit }) {
     if (this.disabled) {
       return;
     }
@@ -241,6 +334,7 @@ export default class FKFieldData extends Component {
       data,
       type: this.type,
       addError: this.addError,
+      preventSubmit,
     });
 
     const validator = new Validator(value, this.rules);

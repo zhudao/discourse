@@ -6,18 +6,24 @@
 
 ca:
   js:
+    discourse_ai:
+      features:
+        data_explorer:
+          name: "Explorador de dades"
     errors:
       explorer:
         no_semicolons: "Elimina els punts i coma de la consulta."
         dirty: "Cal desar la consulta abans d'executar-la"
     explorer:
-      default_query: "Per defecte"
       or: "o"
       admins_only: "L'explorador de dades sols és disponible per a administradors."
       title: "Explorador de dades"
       create: "Crea"
       create_placeholder: "Nom de consulta..."
       description_placeholder: "Introduïu una descripció aquí"
+      ai:
+        generate: "Genera"
+        optional: "opcional"
       import:
         label: "Importa"
       help:
@@ -31,12 +37,11 @@ ca:
           yes: "Sí"
           no: "No"
           null_: "Nul"
-      export: "Exporta"
       run: "Executa"
-      edit: "Edita"
       delete: "Suprimeix"
-      download_json: "JSON"
-      download_csv: "CSV"
+      chart:
+        form:
+          label: "Tipus de gràfic"
       others_dirty: "Una consulta té canvis no desats que es perdran si continueu navegant."
       run_time: "La consulta s'ha completat en %{value} ms."
       result_count:
@@ -44,15 +49,23 @@ ca:
         other: "%{count} resultats."
       query_name: "Consulta"
       query_groups: "Grups"
+      query_tags: "Etiquetes"
       link: "Enllaç de"
       report_name: "Report"
       query_description: "Descripció"
       query_time: "Darrera execució"
       query_user: "Creat per"
       column: "Columna %{number}"
-      explain_label: "Hi incloem pla de consulta?"
       reset_params: "Restableix"
       search_placeholder: "Cerca..."
       no_search_results: "Ho sentim, no hem trobat cap resultat que coincideixi amb el vostre text."
     group:
       reports: "Reports"
+    discourse_workflows:
+      nodes:
+        "action:sql": "Explorador de dades"
+      sql:
+        query_id: "Consulta"
+        param_value: "Valor"
+        output:
+          results: "Resultats"

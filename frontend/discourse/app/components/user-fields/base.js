@@ -1,10 +1,26 @@
 /* eslint-disable ember/no-classic-components, ember/require-tagless-components */
 import Component from "@ember/component";
+import { computed } from "@ember/object";
 import { classNameBindings } from "@ember-decorators/component";
-import discourseComputed from "discourse/lib/decorators";
 
 @classNameBindings(":user-field", "field.field_type", "customFieldClass")
 export default class UserFieldBase extends Component {
+  @computed
+  get noneLabel() {
+    return "user_fields.none";
+  }
+
+  @computed("field.name")
+  get customFieldClass() {
+    if (this.field?.name) {
+      const fieldName = this.field.name
+        .replace(/\s+/g, "-")
+        .replace(/[!\"#$%&'\(\)\*\+,\.\/:;<=>\?\@\[\\\]\^`\{\|\}~]/g, "")
+        .toLowerCase();
+      return fieldName && `user-field-${fieldName}`;
+    }
+  }
+
   didInsertElement() {
     super.didInsertElement(...arguments);
 
@@ -13,21 +29,5 @@ export default class UserFieldBase extends Component {
     );
     element = element || this.element.querySelector("input");
     this.field.element = element;
-  }
-
-  @discourseComputed
-  noneLabel() {
-    return "user_fields.none";
-  }
-
-  @discourseComputed("field.name")
-  customFieldClass(fieldName) {
-    if (fieldName) {
-      fieldName = fieldName
-        .replace(/\s+/g, "-")
-        .replace(/[!\"#$%&'\(\)\*\+,\.\/:;<=>\?\@\[\\\]\^`\{\|\}~]/g, "")
-        .toLowerCase();
-      return fieldName && `user-field-${fieldName}`;
-    }
   }
 }

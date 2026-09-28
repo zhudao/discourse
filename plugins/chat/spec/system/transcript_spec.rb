@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-RSpec.describe "Quoting chat message transcripts", type: :system do
+RSpec.describe "Quoting chat message transcripts" do
   fab!(:current_user, :user)
   fab!(:admin)
   fab!(:chat_channel_1, :chat_channel)
@@ -94,7 +94,7 @@ RSpec.describe "Quoting chat message transcripts", type: :system do
         message_1.rebake!
       end
 
-      it "works" do
+      it "pastes a transcript with the onebox content" do
         chat_page.visit_channel(chat_channel_1)
 
         clip_text = copy_messages_to_clipboard(message_1)
@@ -163,6 +163,7 @@ RSpec.describe "Quoting chat message transcripts", type: :system do
           chat_page.open_from_header
           drawer_page.open_channel(thread_1.channel)
           channel_page.reply_to(message_1)
+          expect(drawer_page).to have_open_thread
           thread_page.messages.select(message_1)
           thread_page.selection_management.quote
 

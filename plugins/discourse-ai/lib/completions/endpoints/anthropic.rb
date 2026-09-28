@@ -42,23 +42,11 @@ module DiscourseAi
           max_tokens = 8192 if mapped_model.match?(/3.[57]/)
 
           options = { model: mapped_model, max_tokens: max_tokens }
-
-          # reasoning has even higher token limits
-          if llm_model.lookup_custom_param("enable_reasoning")
-            reasoning_tokens =
-              llm_model.lookup_custom_param("reasoning_tokens").to_i.clamp(1024, 32_768)
-
-            # this allows for lots of tokens beyond reasoning
-            options[:max_tokens] = reasoning_tokens + 30_000
-            options[:thinking] = { type: "enabled", budget_tokens: reasoning_tokens }
-          end
+          apply_anthropic_thinking_config!(options)
+          apply_anthropic_effort_config!(options)
 
           options[:stop_sequences] = ["</function_calls>"] if !dialect.native_tool_support? &&
             dialect.prompt.has_tools?
-
-          # effort parameter
-          effort = llm_model.lookup_custom_param("effort")
-          options[:output_config] = { effort: effort } if %w[low medium high].include?(effort)
 
           options
         end

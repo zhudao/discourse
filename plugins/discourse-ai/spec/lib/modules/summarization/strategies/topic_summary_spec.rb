@@ -97,6 +97,25 @@ RSpec.describe DiscourseAi::Summarization::Strategies::TopicSummary do
     end
   end
 
+  describe "#summary_fingerprint" do
+    it "uses selected post numbers to compute the same sha as targets_data ids" do
+      fingerprint = topic_summary.summary_fingerprint
+      expected_sha =
+        AiSummary.build_sha(topic_summary.targets_data.map { |content| content[:id] }.join)
+
+      expect(fingerprint[:original_content_sha]).to eq(expected_sha)
+    end
+
+    it "tracks the latest post version timestamp in the selected set" do
+      post_1.update!(last_version_at: 10.minutes.ago)
+      post_2.update!(last_version_at: 2.minutes.ago)
+
+      fingerprint = topic_summary.summary_fingerprint
+
+      expect(fingerprint[:latest_version_at].to_i).to eq(post_2.last_version_at.to_i)
+    end
+  end
+
   describe "#as_llm_messages" do
     let(:contents) do
       [{ id: 1, poster: "user1", text: "First post content", last_version_at: Time.now }]
@@ -109,6 +128,18 @@ RSpec.describe DiscourseAi::Summarization::Strategies::TopicSummary do
       content = messages.first[:content]
 
       expect(content).to include("The discussion title is: Test Topic Title")
+    end
+
+    it "requests output in the selected locale" do
+      localized_summary = described_class.new(topic, locale: "he")
+
+      message_content = localized_summary.as_llm_messages(contents).first[:content]
+
+      expect(localized_summary.locale).to eq("he")
+      expect(message_content).to include(
+        "Write the summary in Hebrew (עברית), regardless of the language used in the input.",
+      )
+      expect(message_content).not_to include("required output locale")
     end
 
     context "when topic has a category" do

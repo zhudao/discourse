@@ -1,15 +1,22 @@
-import { computed } from "@ember/object";
-import { none } from "@ember/object/computed";
 import { capitalize } from "@ember/string";
 import { isEmpty } from "@ember/utils";
 import { Promise } from "rsvp";
-import { ajax } from "discourse/lib/ajax";
+import {
+  bulkBookmarkOperation,
+  deleteBookmark,
+  togglePinBookmark,
+} from "discourse/data/builders/bookmarks";
+import RestCompatModel from "discourse/data/rest-compat";
+import { BookmarkSchema } from "discourse/data/schemas/bookmark";
+import {
+  defineFieldForwarders,
+  warpStore,
+} from "discourse/data/warp-rest-model";
 import { formattedReminderTime } from "discourse/lib/bookmark";
-import discourseComputed from "discourse/lib/decorators";
 import { longDate } from "discourse/lib/formatter";
+import { getOwnerWithFallback } from "discourse/lib/get-owner";
 import getURL from "discourse/lib/get-url";
 import { applyModelTransformations } from "discourse/lib/model-transformers";
-import RestModel from "discourse/models/rest";
 import Topic from "discourse/models/topic";
 import User from "discourse/models/user";
 import { i18n } from "discourse-i18n";
@@ -26,12 +33,22 @@ export const NO_REMINDER_ICON = "bookmark";
 export const NOT_BOOKMARKED = "far-bookmark";
 export const WITH_REMINDER_ICON = "discourse-bookmark-clock";
 
-export default class Bookmark extends RestModel {
-  static create(args) {
-    args = args || {};
-    args.currentUser = args.currentUser || User.current();
-    args.user = User.create(args.user);
-    return super.create(args);
+export default class Bookmark extends RestCompatModel {
+  static type = "bookmark";
+  static builders = { delete: deleteBookmark };
+
+  // `user` is wrapped as a User instance (legacy parity); `currentUser` is
+  // stashed on the wrapper as an own property (survives `_adoptResource` and
+  // isn't part of the schema).
+  static create(args = {}) {
+    if (args instanceof Bookmark) {
+      return args;
+    }
+
+    const { user, currentUser, ...rest } = args;
+    const wrapper = super.create({ ...rest, user: User.create(user) });
+    wrapper.currentUser = currentUser || User.current();
+    return wrapper;
   }
 
   static createFor(user, bookmarkableType, bookmarkableId) {
@@ -44,36 +61,123 @@ export default class Bookmark extends RestModel {
   }
 
   static bulkOperation(bookmarks, operation) {
-    const data = {
-      bookmark_ids: bookmarks.map((item) => item.id),
-      operation,
-    };
-
-    return ajax("/bookmarks/bulk", {
-      type: "PUT",
-      data,
-    });
+    return warpStore().request(
+      bulkBookmarkOperation(
+        bookmarks.map((b) => b.id),
+        operation
+      )
+    );
   }
 
   static async applyTransformations(bookmarks) {
     await applyModelTransformations("bookmark", bookmarks);
   }
 
-  @none("id") newBookmark;
+  #topicForList;
 
-  @computed
+  #siteSettings;
+
+  get newBookmark() {
+    return this.id == null;
+  }
+
   get url() {
     return getURL(`/bookmarks/${this.id}`);
   }
 
-  destroy() {
-    if (this.newBookmark) {
-      return Promise.resolve();
+  get lastPostUrl() {
+    return this.topic_id
+      ? this.urlForPostNumber(this.highest_post_number)
+      : this.bookmarkable_url;
+  }
+
+  get bumpedAt() {
+    return this.bumped_at ? new Date(this.bumped_at) : this.createdAt;
+  }
+
+  get bumpedAtTitle() {
+    const BUMPED_FORMAT = "YYYY-MM-DDTHH:mm:ss";
+    if (moment(this.bumpedAt).isValid() && moment(this.createdAt).isValid()) {
+      const bumpedAtStr = moment(this.bumpedAt).format(BUMPED_FORMAT);
+      const createdAtStr = moment(this.createdAt).format(BUMPED_FORMAT);
+
+      return bumpedAtStr !== createdAtStr
+        ? `${i18n("topic.created_at", {
+            date: longDate(this.createdAt),
+          })}\n${i18n("topic.bumped_at", { date: longDate(this.bumpedAt) })}`
+        : i18n("topic.created_at", { date: longDate(this.createdAt) });
+    }
+  }
+
+  get timezone() {
+    return this.currentUser?.user_option?.timezone || moment.tz.guess();
+  }
+
+  get reminderTitle() {
+    if (!isEmpty(this.reminder_at)) {
+      return i18n("bookmarks.created_with_reminder_generic", {
+        date: formattedReminderTime(this.reminder_at, this.timezone),
+        name: this.name || "",
+      });
     }
 
-    return ajax(this.url, {
-      type: "DELETE",
+    return i18n("bookmarks.created_generic", {
+      name: this.name || "",
     });
+  }
+
+  get createdAt() {
+    return new Date(this.created_at);
+  }
+
+  // Read per row on the bookmark list — cache the service lookup.
+  get visibleListTags() {
+    const tags = this.tags;
+    this.#siteSettings ??= getOwnerWithFallback().lookup(
+      "service:site-settings"
+    );
+    if (!tags || !this.#siteSettings.suppress_overlapping_tags_in_list) {
+      return tags;
+    }
+
+    const title = this.title.toLowerCase();
+    return tags.filter((tag) => !title.includes(tag));
+  }
+
+  get category() {
+    return Category.findById(this.category_id);
+  }
+
+  get formattedReminder() {
+    return capitalize(formattedReminderTime(this.reminder_at, this.timezone));
+  }
+
+  get reminderAtExpired() {
+    return moment(this.reminder_at) < moment();
+  }
+
+  // For topic-level bookmarks, no linked post number — let the topic-link
+  // helper jump to the last unread post by default.
+  //
+  // Built once: read from a list row, where a fresh `Topic` per read would fire
+  // `init` callbacks on every rerender and hand out a new identity each time.
+  get topicForList() {
+    return (this.#topicForList ??= Topic.create({
+      id: this.topic_id,
+      fancy_title: this.fancy_title,
+      linked_post_number:
+        this.bookmarkable_type === "Topic" ? null : this.linked_post_number,
+      last_read_post_number: this.last_read_post_number,
+      highest_post_number: this.highest_post_number,
+    }));
+  }
+
+  get bookmarkableTopicAlike() {
+    return ["Topic", "Post"].includes(this.bookmarkable_type);
+  }
+
+  get hasMetadata() {
+    return this.reminder_at || this.name;
   }
 
   attachedTo() {
@@ -87,21 +191,11 @@ export default class Bookmark extends RestModel {
     if (this.newBookmark) {
       return Promise.resolve();
     }
-
-    return ajax(this.url + "/toggle_pin", {
-      type: "PUT",
-    });
+    return warpStore().request(togglePinBookmark(this.id));
   }
 
   pinAction() {
     return this.pinned ? "unpin" : "pin";
-  }
-
-  @discourseComputed("topic_id", "highest_post_number", "bookmarkable_url")
-  lastPostUrl(topic_id, highest_post_number, bookmarkable_url) {
-    return topic_id
-      ? this.urlForPostNumber(highest_post_number)
-      : bookmarkable_url;
   }
 
   urlForPostNumber(postNumber) {
@@ -111,111 +205,6 @@ export default class Bookmark extends RestModel {
     }
     return url;
   }
-
-  @discourseComputed("bumped_at", "createdAt")
-  bumpedAt(bumped_at, createdAt) {
-    return bumped_at ? new Date(bumped_at) : createdAt;
-  }
-
-  @discourseComputed("bumpedAt", "createdAt")
-  bumpedAtTitle(bumpedAt, createdAt) {
-    const BUMPED_FORMAT = "YYYY-MM-DDTHH:mm:ss";
-    if (moment(bumpedAt).isValid() && moment(createdAt).isValid()) {
-      const bumpedAtStr = moment(bumpedAt).format(BUMPED_FORMAT);
-      const createdAtStr = moment(createdAt).format(BUMPED_FORMAT);
-
-      return bumpedAtStr !== createdAtStr
-        ? `${i18n("topic.created_at", {
-            date: longDate(createdAt),
-          })}\n${i18n("topic.bumped_at", { date: longDate(bumpedAt) })}`
-        : i18n("topic.created_at", { date: longDate(createdAt) });
-    }
-  }
-
-  @discourseComputed("name", "reminder_at")
-  reminderTitle(name, reminderAt) {
-    if (!isEmpty(reminderAt)) {
-      return i18n("bookmarks.created_with_reminder_generic", {
-        date: formattedReminderTime(
-          reminderAt,
-          this.currentUser?.user_option?.timezone || moment.tz.guess()
-        ),
-        name: name || "",
-      });
-    }
-
-    return i18n("bookmarks.created_generic", {
-      name: name || "",
-    });
-  }
-
-  @discourseComputed("created_at")
-  createdAt(created_at) {
-    return new Date(created_at);
-  }
-
-  @discourseComputed("tags")
-  visibleListTags(tags) {
-    if (!tags || !this.siteSettings.suppress_overlapping_tags_in_list) {
-      return tags;
-    }
-
-    const title = this.title;
-    const newTags = [];
-
-    tags.forEach(function (tag) {
-      if (!title.toLowerCase().includes(tag)) {
-        newTags.push(tag);
-      }
-    });
-
-    return newTags;
-  }
-
-  @computed("category_id")
-  get category() {
-    return Category.findById(this.category_id);
-  }
-
-  @discourseComputed("reminder_at", "currentUser")
-  formattedReminder(bookmarkReminderAt, currentUser) {
-    return capitalize(
-      formattedReminderTime(
-        bookmarkReminderAt,
-        currentUser?.user_option?.timezone || moment.tz.guess()
-      )
-    );
-  }
-
-  @discourseComputed("reminder_at")
-  reminderAtExpired(bookmarkReminderAt) {
-    return moment(bookmarkReminderAt) < moment();
-  }
-
-  @discourseComputed()
-  topicForList() {
-    // for topic level bookmarks we want to jump to the last unread post URL,
-    // which the topic-link helper does by default if no linked post number is
-    // provided
-    const linkedPostNumber =
-      this.bookmarkable_type === "Topic" ? null : this.linked_post_number;
-
-    return Topic.create({
-      id: this.topic_id,
-      fancy_title: this.fancy_title,
-      linked_post_number: linkedPostNumber,
-      last_read_post_number: this.last_read_post_number,
-      highest_post_number: this.highest_post_number,
-    });
-  }
-
-  @discourseComputed("bookmarkable_type")
-  bookmarkableTopicAlike(bookmarkable_type) {
-    return ["Topic", "Post"].includes(bookmarkable_type);
-  }
-
-  @discourseComputed("reminder_at", "name")
-  hasMetadata() {
-    return this.reminder_at || this.name;
-  }
 }
+
+defineFieldForwarders(Bookmark, BookmarkSchema);

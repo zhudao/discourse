@@ -47,6 +47,26 @@ RSpec.describe DiscourseAi::AiHelper::Assistant do
   describe("#available_prompts") do
     before { DiscourseAi::AiHelper::Assistant.clear_prompt_cache! }
 
+    it "keeps proofreader available when granular permissions are toggled with warm caches" do
+      agent = AiAgent.find(SiteSetting.ai_helper_proofreader_agent)
+      agent.update!(allowed_group_ids: [Fabricate(:group).id, Group::AUTO_GROUPS[:everyone]])
+
+      SiteSetting.granular_anonymous_and_logged_in_groups_permissions = false
+      expect(assistant.available_prompts(user).map { |prompt| prompt[:name] }).to include(
+        described_class::PROOFREAD,
+      )
+
+      SiteSetting.granular_anonymous_and_logged_in_groups_permissions = true
+      expect(assistant.available_prompts(user).map { |prompt| prompt[:name] }).to include(
+        described_class::PROOFREAD,
+      )
+
+      SiteSetting.granular_anonymous_and_logged_in_groups_permissions = false
+      expect(assistant.available_prompts(user).map { |prompt| prompt[:name] }).to include(
+        described_class::PROOFREAD,
+      )
+    end
+
     it "returns all available prompts" do
       prompts = assistant.available_prompts(user)
 
@@ -89,7 +109,7 @@ RSpec.describe DiscourseAi::AiHelper::Assistant do
       expect { assistant.available_prompts(user) }.not_to raise_error
     end
 
-    context "when PostIllustrator persona has an image generation tool" do
+    context "when PostIllustrator agent has an image generation tool" do
       let(:image_tool) do
         AiTool.create!(
           name: "Test Image Generator",
@@ -108,9 +128,9 @@ RSpec.describe DiscourseAi::AiHelper::Assistant do
         )
       end
 
-      context "with system PostIllustrator persona (dynamic tool discovery)" do
+      context "with system PostIllustrator agent (dynamic tool discovery)" do
         before do
-          # Use the default system PostIllustrator persona
+          # Use the default system PostIllustrator agent
           image_tool # Create the tool
           DiscourseAi::AiHelper::Assistant.clear_prompt_cache!
         end
@@ -129,23 +149,23 @@ RSpec.describe DiscourseAi::AiHelper::Assistant do
           )
         end
 
-        it "PostIllustrator persona has tools and forces their use" do
-          persona = AiPersona.find_by(id: SiteSetting.ai_helper_post_illustrator_persona)
-          persona_instance = persona.class_instance.new
+        it "PostIllustrator agent has tools and forces their use" do
+          agent = AiAgent.find_by(id: SiteSetting.ai_helper_post_illustrator_agent)
+          agent_instance = agent.class_instance.new
 
-          expect(persona_instance.tools).not_to be_empty
-          expect(persona_instance.tools.first).to be_a(Class)
-          expect(persona_instance.tools.first.tool_id).to eq(image_tool.id)
-          expect(persona_instance.force_tool_use).to eq(persona_instance.tools)
-          expect(persona_instance.forced_tool_count).to eq(1)
+          expect(agent_instance.tools).not_to be_empty
+          expect(agent_instance.tools.first).to be_a(Class)
+          expect(agent_instance.tools.first.tool_id).to eq(image_tool.id)
+          expect(agent_instance.force_tool_use).to eq(agent_instance.tools)
+          expect(agent_instance.forced_tool_count).to eq(1)
         end
       end
 
-      context "with custom persona" do
-        let(:custom_persona) do
-          AiPersona.create!(
+      context "with custom agent" do
+        let(:custom_agent) do
+          AiAgent.create!(
             name: "Custom Post Illustrator",
-            description: "Test persona with image tool",
+            description: "Test agent with image tool",
             system_prompt: "You are an AI that generates images from text prompts.",
             enabled: true,
             system: false,
@@ -155,8 +175,8 @@ RSpec.describe DiscourseAi::AiHelper::Assistant do
         end
 
         before do
-          # Set the custom persona as the illustrator persona
-          SiteSetting.ai_helper_post_illustrator_persona = custom_persona.id
+          # Set the custom agent as the illustrator agent
+          SiteSetting.ai_helper_post_illustrator_agent = custom_agent.id
           DiscourseAi::AiHelper::Assistant.clear_prompt_cache!
         end
 
@@ -210,9 +230,9 @@ RSpec.describe DiscourseAi::AiHelper::Assistant do
 
         it "gracefully handles PostIllustrator.tools raising exception" do
           # Stub the PostIllustrator class to raise an error
-          allow_any_instance_of(DiscourseAi::Personas::PostIllustrator).to receive(
-            :tools,
-          ).and_raise(StandardError.new("Tool discovery failed"))
+          allow_any_instance_of(DiscourseAi::Agents::PostIllustrator).to receive(:tools).and_raise(
+            StandardError.new("Tool discovery failed"),
+          )
 
           DiscourseAi::AiHelper::Assistant.clear_prompt_cache!
 
@@ -228,7 +248,7 @@ RSpec.describe DiscourseAi::AiHelper::Assistant do
   describe("#attach_user_context") do
     before { SiteSetting.allow_user_locale = true }
 
-    let(:context) { DiscourseAi::Personas::BotContext.new(user: user) }
+    let(:context) { DiscourseAi::Agents::BotContext.new(user: user) }
 
     it "is able to perform %LANGUAGE% replacements" do
       assistant.attach_user_context(context, user)
@@ -291,10 +311,15 @@ RSpec.describe DiscourseAi::AiHelper::Assistant do
         expect(response[:suggestions]).to contain_exactly(english_text)
       end
 
-      context "when the persona is not using structured outputs" do
+      context "when the agent is not using structured outputs" do
         it "still works" do
-          regular_persona = Fabricate(:ai_persona, response_format: nil)
-          SiteSetting.ai_helper_translator_persona = regular_persona.id
+          regular_agent =
+            Fabricate(
+              :ai_agent,
+              response_format: nil,
+              allowed_group_ids: [Group::AUTO_GROUPS[:trust_level_0]],
+            )
+          SiteSetting.ai_helper_translator_agent = regular_agent.id
 
           response =
             DiscourseAi::Completions::Llm.with_prepared_responses([english_text]) do
@@ -336,6 +361,99 @@ RSpec.describe DiscourseAi::AiHelper::Assistant do
           end
 
         expect(response[:suggestions]).to contain_exactly(*expected)
+      end
+
+      it "returns clean suggestions when the model streams the JSON across many partial chunks" do
+        streaming_assistant = described_class.new(helper_llm: Fabricate(:llm_model))
+
+        # Mirrors backends that emit a title's closing `",` and the following
+        # whitespace as separate deltas, leaving the buffered JSON with a
+        # dangling comma between chunks.
+        deltas = [
+          "{",
+          "\n",
+          " ",
+          " \"",
+          "output",
+          "\":",
+          " [",
+          "\n",
+          "   ",
+          " \"",
+          "The",
+          " solitary",
+          " horse",
+          "\",",
+          "\n",
+          "   ",
+          " \"",
+          "A",
+          " horse",
+          " lost",
+          " in",
+          " time",
+          "\"",
+          "\n",
+          " ",
+          " ]",
+          "\n",
+          "}",
+        ]
+
+        body =
+          deltas
+            .map { |delta| { choices: [{ index: 0, delta: { content: delta } }] } }
+            .push({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })
+            .map { |event| "data: #{event.to_json}\n\n" }
+            .join
+        body << "data: [DONE]\n\n"
+
+        stub_request(:post, "https://api.openai.com/v1/chat/completions").to_return(
+          status: 200,
+          body: body,
+        )
+
+        response = streaming_assistant.generate_and_send_prompt(mode, english_text, user)
+
+        expect(response[:suggestions]).to eq(["The solitary horse", "A horse lost in time"])
+      end
+    end
+
+    context "when using a prompt that returns a string" do
+      let(:mode) { described_class::PROOFREAD }
+
+      it "preserves whitespace-only deltas streamed between paragraphs" do
+        streaming_assistant = described_class.new(helper_llm: Fabricate(:llm_model))
+
+        # Mirrors backends that emit paragraph breaks (an escaped "\n\n") or a
+        # bare space as their own delta; reading the buffered property consumes
+        # it, so dropping these chunks loses the whitespace permanently.
+        deltas = [
+          "{\"output\":\"",
+          "First paragraph.",
+          "\\n\\n",
+          "Do a",
+          " ",
+          "2-pass on every message.",
+          "\"}",
+        ]
+
+        body =
+          deltas
+            .map { |delta| { choices: [{ index: 0, delta: { content: delta } }] } }
+            .push({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })
+            .map { |event| "data: #{event.to_json}\n\n" }
+            .join
+        body << "data: [DONE]\n\n"
+
+        stub_request(:post, "https://api.openai.com/v1/chat/completions").to_return(
+          status: 200,
+          body: body,
+        )
+
+        response = streaming_assistant.generate_and_send_prompt(mode, english_text, user)
+
+        expect(response[:suggestions]).to eq(["First paragraph.\n\nDo a 2-pass on every message."])
       end
     end
   end

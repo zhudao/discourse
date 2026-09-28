@@ -5,3 +5,24 @@
 # https://translate.discourse.org/
 
 de:
+  admin_js:
+    admin:
+      site_settings:
+        categories:
+          discourse_math: "Discourse Math"
+  js:
+    discourse_math:
+      edit_math: "Formel bearbeiten"
+      edit_modal:
+        title: "Formel bearbeiten"
+        label: "Formel"
+        apply: "Anwenden"
+      composer:
+        insert_math: "Formel einfügen"
+      insert_modal:
+        title_inline: "Inline-Formel einfügen"
+        title_block: "Formelblock einfügen"
+        label: "LaTeX"
+        placeholder: "E=mc^2"
+        insert: "Einfügen"
+        block_mode: "Blockmodus (angezeigte Gleichung)"

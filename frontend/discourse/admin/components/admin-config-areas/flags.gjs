@@ -6,13 +6,13 @@ import { ajax } from "discourse/lib/ajax";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import { removeValueFromArray } from "discourse/lib/array-tools";
 import { bind } from "discourse/lib/decorators";
-import { trackedArray } from "discourse/lib/tracked-tools";
+import { autoTrackedArray } from "discourse/lib/tracked-tools";
 import { i18n } from "discourse-i18n";
 
 export default class AdminConfigAreasFlags extends Component {
   @service site;
 
-  @trackedArray flags = this.site.flagTypes;
+  @autoTrackedArray flags = this.site.flagTypes;
 
   @bind
   isFirstFlag(flag) {
@@ -77,11 +77,11 @@ export default class AdminConfigAreasFlags extends Component {
         <tbody class="d-table__body">
           {{#each this.flags as |flag|}}
             <AdminFlagItem
-              @flag={{flag}}
-              @moveFlagCallback={{this.moveFlagCallback}}
               @deleteFlagCallback={{this.deleteFlagCallback}}
+              @flag={{flag}}
               @isFirstFlag={{this.isFirstFlag flag}}
               @isLastFlag={{this.isLastFlag flag}}
+              @moveFlagCallback={{this.moveFlagCallback}}
             />
           {{/each}}
         </tbody>

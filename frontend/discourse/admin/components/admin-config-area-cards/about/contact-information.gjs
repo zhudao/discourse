@@ -1,5 +1,5 @@
 import Component from "@glimmer/component";
-import { cached, tracked } from "@glimmer/tracking";
+import { cached } from "@glimmer/tracking";
 import { hash } from "@ember/helper";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
@@ -14,21 +14,30 @@ export default class AdminConfigAreasAboutContactInformation extends Component {
   @service site;
   @service toasts;
 
-  @tracked
-  contactGroupId = this.site.groups.find(
-    (group) => group.name === this.data.contactGroupName
-  )?.id;
-
   @cached
   get data() {
     return {
-      communityOwner: this.args.contactInformation.communityOwner.value,
+      communityOwner: this.#settingValue(
+        "community_owner",
+        this.args.contactInformation.communityOwner
+      ),
       contactEmail: this.args.contactInformation.contactEmail.value,
       contactURL: this.args.contactInformation.contactURL.value,
-      contactGroupName: this.args.contactInformation.contactGroupName.value,
+      contactGroupName:
+        this.site.groupsById[
+          this.args.contactInformation.contactGroupName.value
+        ]?.id ?? null,
       contactUsername:
         this.args.contactInformation.contactUsername.value || null,
     };
+  }
+
+  get #savePath() {
+    if (this.args.isDefaultLocale) {
+      return "/admin/config/about.json";
+    }
+
+    return "/admin/config/about/localizations.json";
   }
 
   @action
@@ -38,25 +47,16 @@ export default class AdminConfigAreasAboutContactInformation extends Component {
 
   @action
   setContactGroup(groupIds, { set }) {
-    this.contactGroupId = groupIds[0];
-    set("contactGroupName", this.site.groupsById[groupIds[0]]?.name);
+    set("contactGroupName", groupIds[0] ?? null);
   }
 
   @action
   async save(data) {
     try {
       this.args.setGlobalSavingStatus(true);
-      await ajax("/admin/config/about.json", {
+      await ajax(this.#savePath, {
         type: "PUT",
-        data: {
-          contact_information: {
-            community_owner: data.communityOwner,
-            contact_email: data.contactEmail,
-            contact_url: data.contactURL,
-            contact_username: data.contactUsername,
-            contact_group_name: data.contactGroupName,
-          },
-        },
+        data: this.#saveData(data),
       });
       this.toasts.success({
         duration: "short",
@@ -73,90 +73,125 @@ export default class AdminConfigAreasAboutContactInformation extends Component {
     }
   }
 
+  #saveData(data) {
+    const payload = {
+      locale: this.args.locale,
+      contact_information: {
+        community_owner: data.communityOwner,
+      },
+    };
+
+    if (this.args.isDefaultLocale) {
+      payload.contact_information.contact_email = data.contactEmail;
+      payload.contact_information.contact_url = data.contactURL;
+      payload.contact_information.contact_username = data.contactUsername;
+      payload.contact_information.contact_group_name = data.contactGroupName;
+    }
+
+    return payload;
+  }
+
+  #settingValue(settingName, setting) {
+    if (this.args.isDefaultLocale) {
+      return setting.value;
+    }
+
+    return this.args.localizations?.[settingName]?.value ?? "";
+  }
+
   <template>
     <Form @data={{this.data}} @onSubmit={{this.save}} as |form|>
       <form.Field
-        @name="communityOwner"
-        @title={{i18n "admin.config_areas.about.community_owner"}}
         @description={{i18n "admin.config_areas.about.community_owner_help"}}
         @format="large"
+        @name="communityOwner"
+        @title={{i18n "admin.config_areas.about.community_owner"}}
+        @type="input"
         as |field|
       >
-        <field.Input
+        <field.Control
           placeholder={{i18n
             "admin.config_areas.about.community_owner_placeholder"
           }}
         />
       </form.Field>
 
-      <form.Field
-        @name="contactEmail"
-        @title={{i18n "admin.config_areas.about.contact_email"}}
-        @description={{i18n "admin.config_areas.about.contact_email_help"}}
-        @type="email"
-        @format="large"
-        as |field|
-      >
-        <field.Input
-          placeholder={{i18n
-            "admin.config_areas.about.contact_email_placeholder"
-          }}
-        />
-      </form.Field>
-
-      <form.Field
-        @name="contactURL"
-        @title={{i18n "admin.config_areas.about.contact_url"}}
-        @description={{i18n "admin.config_areas.about.contact_url_help"}}
-        @type="url"
-        @format="large"
-        as |field|
-      >
-        <field.Input
-          placeholder={{i18n
-            "admin.config_areas.about.contact_url_placeholder"
-          }}
-        />
-      </form.Field>
-
-      <form.Field
-        @name="contactUsername"
-        @title={{i18n "admin.config_areas.about.site_contact_name"}}
-        @description={{i18n "admin.config_areas.about.site_contact_name_help"}}
-        @onSet={{this.setContactUsername}}
-        @format="large"
-        as |field|
-      >
-        <field.Custom>
-          <UserChooser
-            @value={{field.value}}
-            @options={{hash maximum=1}}
-            @onChange={{field.set}}
+      {{#if @isDefaultLocale}}
+        <form.Field
+          @description={{i18n "admin.config_areas.about.contact_email_help"}}
+          @format="large"
+          @name="contactEmail"
+          @title={{i18n "admin.config_areas.about.contact_email"}}
+          @type="input-email"
+          as |field|
+        >
+          <field.Control
+            placeholder={{i18n
+              "admin.config_areas.about.contact_email_placeholder"
+            }}
           />
-        </field.Custom>
-      </form.Field>
+        </form.Field>
 
-      <form.Field
-        @name="contactGroupName"
-        @title={{i18n "admin.config_areas.about.site_contact_group"}}
-        @description={{i18n "admin.config_areas.about.site_contact_group_help"}}
-        @onSet={{this.setContactGroup}}
-        @format="large"
-        as |field|
-      >
-        <field.Custom>
-          <GroupChooser
-            @content={{this.site.groups}}
-            @value={{this.contactGroupId}}
-            @options={{hash maximum=1}}
-            @onChange={{field.set}}
+        <form.Field
+          @description={{i18n "admin.config_areas.about.contact_url_help"}}
+          @format="large"
+          @name="contactURL"
+          @title={{i18n "admin.config_areas.about.contact_url"}}
+          @type="input-url"
+          as |field|
+        >
+          <field.Control
+            placeholder={{i18n
+              "admin.config_areas.about.contact_url_placeholder"
+            }}
           />
-        </field.Custom>
-      </form.Field>
+        </form.Field>
+
+        <form.Field
+          @description={{i18n
+            "admin.config_areas.about.site_contact_name_help"
+          }}
+          @format="large"
+          @name="contactUsername"
+          @onSet={{this.setContactUsername}}
+          @title={{i18n "admin.config_areas.about.site_contact_name"}}
+          @type="custom"
+          as |field|
+        >
+          <field.Control>
+            <UserChooser
+              @onChange={{field.set}}
+              @options={{hash maximum=1}}
+              @value={{field.value}}
+            />
+          </field.Control>
+        </form.Field>
+
+        <form.Field
+          @description={{i18n
+            "admin.config_areas.about.site_contact_group_help"
+          }}
+          @format="large"
+          @name="contactGroupName"
+          @onSet={{this.setContactGroup}}
+          @title={{i18n "admin.config_areas.about.site_contact_group"}}
+          @type="custom"
+          as |field|
+        >
+          <field.Control>
+            <GroupChooser
+              @content={{this.site.groups}}
+              @onChange={{field.set}}
+              @options={{hash maximum=1}}
+              @value={{field.value}}
+            />
+          </field.Control>
+        </form.Field>
+      {{/if}}
 
       <form.Submit
-        @label="admin.config_areas.about.update"
         @disabled={{@globalSavingStatus}}
+        @label="admin.config_areas.about.update"
       />
     </Form>
   </template>

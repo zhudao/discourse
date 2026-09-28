@@ -67,9 +67,15 @@ class TagGroupsController < ApplicationController
     guardian.ensure_can_admin_tag_groups!
     old_data = TagGroupSerializer.new(@tag_group).to_json(root: false)
     json_result(@tag_group, serializer: TagGroupSerializer) do |tag_group|
-      @tag_group.update(tag_groups_params)
-      new_data = TagGroupSerializer.new(@tag_group).to_json(root: false)
-      StaffActionLogger.new(current_user).log_tag_group_change(@tag_group.name, old_data, new_data)
+      if @tag_group.update(tag_groups_params)
+        new_data = TagGroupSerializer.new(@tag_group).to_json(root: false)
+        StaffActionLogger.new(current_user).log_tag_group_change(
+          @tag_group.name,
+          old_data,
+          new_data,
+        )
+        true
+      end
     end
   end
 
@@ -84,7 +90,7 @@ class TagGroupsController < ApplicationController
   end
 
   def search
-    matches = TagGroup.includes(:tags).visible(guardian).all
+    matches = TagGroup.visible(guardian).includes(:base_tags)
 
     matches = matches.where("lower(name) ILIKE ?", "%#{params[:q].strip}%") if params[:q].present?
 
@@ -92,28 +98,26 @@ class TagGroupsController < ApplicationController
       matches = matches.where("lower(NAME) in (?)", params[:names].map(&:downcase))
     end
 
-    matches =
-      matches.order("name").limit(
-        fetch_limit_from_params(
-          default: SiteSetting.max_tag_search_results,
-          max: MAX_TAG_GROUPS_SEARCH_RESULTS,
-        ),
+    limit =
+      fetch_limit_from_params(
+        default: SiteSetting.max_tag_search_results,
+        max: MAX_TAG_GROUPS_SEARCH_RESULTS,
       )
 
-    render json: {
-             results:
-               matches.map do |x|
-                 {
-                   name: x.name,
-                   tags:
-                     x
-                       .tags
-                       .base_tags
-                       .pluck(:id, :name, :slug)
-                       .map { |id, name, slug| { id:, name:, slug: } },
-                 }
-               end,
-           }
+    matches = matches.order("name").limit(limit).to_a
+    visible_tag_ids = DiscourseTagging.visible_tag_ids(matches.flat_map(&:base_tags), guardian)
+
+    results =
+      matches.map do |tag_group|
+        tags = tag_group.base_tags.select { |tag| visible_tag_ids.include?(tag.id) }
+
+        {
+          name: tag_group.name,
+          tags: tags.map { |tag| { id: tag.id, name: tag.name, slug: tag.slug } },
+        }
+      end
+
+    render json: { results: }
   end
 
   private

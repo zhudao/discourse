@@ -10,7 +10,7 @@ import { isTesting } from "discourse/lib/environment";
 import getURL from "discourse/lib/get-url";
 import { disableImplicitInjections } from "discourse/lib/implicit-injections";
 import discourseLater from "discourse/lib/later";
-import { trackedArray } from "discourse/lib/tracked-tools";
+import { autoTrackedArray } from "discourse/lib/tracked-tools";
 import userPresent, {
   onPresenceChange,
   removeOnPresenceChange,
@@ -49,6 +49,29 @@ class PresenceChannel extends EmberObject.extend(Evented) {
     this.presenceService = presenceService;
     this.set("present", false);
     this.set("subscribed", false);
+  }
+
+  @dependentKeyCompat
+  get users() {
+    if (this.get("subscribed")) {
+      return this._presenceState.users;
+    }
+  }
+
+  @computed("_presenceState.count", "subscribed")
+  get count() {
+    if (!this.subscribed) {
+      return;
+    }
+    return this._presenceState?.count;
+  }
+
+  @computed("_presenceState.count", "subscribed")
+  get countOnly() {
+    if (!this.subscribed) {
+      return;
+    }
+    return this._presenceState?.countOnly;
   }
 
   // Mark the current user as 'present' in this channel
@@ -109,33 +132,10 @@ class PresenceChannel extends EmberObject.extend(Evented) {
   _publishChange() {
     this.trigger("change", this);
   }
-
-  @dependentKeyCompat
-  get users() {
-    if (this.get("subscribed")) {
-      return this._presenceState.users;
-    }
-  }
-
-  @computed("_presenceState.count", "subscribed")
-  get count() {
-    if (!this.subscribed) {
-      return;
-    }
-    return this._presenceState?.count;
-  }
-
-  @computed("_presenceState.count", "subscribed")
-  get countOnly() {
-    if (!this.subscribed) {
-      return;
-    }
-    return this._presenceState?.countOnly;
-  }
 }
 
 class PresenceChannelState extends EmberObject.extend(Evented) {
-  @trackedArray users;
+  @autoTrackedArray users;
 
   init({ name, presenceService }) {
     super.init(...arguments);
@@ -514,7 +514,7 @@ export default class PresenceService extends Service {
   }
 
   async _updateServer() {
-    if (this.isDestroying || this.isDestroyed) {
+    if (this.isDestroying) {
       return;
     }
 
@@ -607,7 +607,7 @@ export default class PresenceService extends Service {
   // drop back to the last event via the regular throttle function.
   @bind
   _throttledUpdateServer() {
-    if (this.isDestroying || this.isDestroyed) {
+    if (this.isDestroying) {
       return;
     }
 

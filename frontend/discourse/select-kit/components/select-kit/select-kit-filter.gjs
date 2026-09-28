@@ -2,16 +2,14 @@
 import Component, { Input } from "@ember/component";
 import { on } from "@ember/modifier";
 import { action, computed } from "@ember/object";
-import { not } from "@ember/object/computed";
 import { isPresent } from "@ember/utils";
 import {
   attributeBindings,
   classNameBindings,
   classNames,
 } from "@ember-decorators/component";
-import icon from "discourse/helpers/d-icon";
-import discourseComputed from "discourse/lib/decorators";
 import selectKitPropUtils from "discourse/select-kit/lib/select-kit-prop-utils";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
 import { i18n } from "discourse-i18n";
 
 @classNames("select-kit-filter")
@@ -21,7 +19,10 @@ import { i18n } from "discourse-i18n";
 export default class SelectKitFilter extends Component {
   tabIndex = -1;
 
-  @not("isHidden") isExpanded;
+  @computed("isHidden")
+  get isExpanded() {
+    return !this.isHidden;
+  }
 
   @computed(
     "selectKit.options.{filterable,allowAny,autoFilterable}",
@@ -35,18 +36,18 @@ export default class SelectKitFilter extends Component {
     );
   }
 
-  @discourseComputed(
+  @computed(
     "selectKit.options.filterPlaceholder",
     "selectKit.options.translatedFilterPlaceholder",
     "selectKit.options.allowAny"
   )
-  placeholder(placeholder, translatedPlaceholder) {
-    if (isPresent(translatedPlaceholder)) {
-      return translatedPlaceholder;
+  get placeholder() {
+    if (isPresent(this.selectKit?.options?.translatedFilterPlaceholder)) {
+      return this.selectKit?.options?.translatedFilterPlaceholder;
     }
 
-    if (isPresent(placeholder)) {
-      return i18n(placeholder);
+    if (isPresent(this.selectKit?.options?.filterPlaceholder)) {
+      return i18n(this.selectKit?.options?.filterPlaceholder);
     }
 
     return i18n(
@@ -95,7 +96,11 @@ export default class SelectKitFilter extends Component {
     }
 
     if (event.key === "ArrowUp") {
-      this.selectKit.highlightLast();
+      if (this.selectKit.highlighted) {
+        this.selectKit.highlightPrevious();
+      } else {
+        this.selectKit.highlightLast();
+      }
       event.preventDefault();
       return false;
     }
@@ -104,7 +109,11 @@ export default class SelectKitFilter extends Component {
       if (!this.selectKit.isExpanded) {
         this.selectKit.open(event);
       }
-      this.selectKit.highlightFirst();
+      if (this.selectKit.highlighted) {
+        this.selectKit.highlightNext();
+      } else {
+        this.selectKit.highlightFirst();
+      }
       event.preventDefault();
       return false;
     }
@@ -132,8 +141,8 @@ export default class SelectKitFilter extends Component {
       (!this.selectKit.highlighted || this.selectKit.enterDisabled)
     ) {
       this.element.querySelector("input").focus();
+      event.preventDefault();
       if (this.selectKit.enterDisabled) {
-        event.preventDefault();
         event.stopImmediatePropagation();
       }
       return false;
@@ -145,19 +154,18 @@ export default class SelectKitFilter extends Component {
   <template>
     {{#unless this.isHidden}}
       {{! filter-input-search prevents 1password from attempting autocomplete }}
-      {{! template-lint-disable no-pointer-down-event-binding }}
 
       <Input
-        tabindex={{0}}
-        class="filter-input"
-        placeholder={{this.placeholder}}
+        autocapitalize="off"
         autocomplete="off"
         autocorrect="off"
-        autocapitalize="off"
+        class="filter-input"
         name="filter-input-search"
+        placeholder={{this.placeholder}}
         spellcheck={{false}}
-        @value={{readonly this.selectKit.filter}}
+        tabindex={{0}}
         @type="search"
+        @value={{readonly this.selectKit.filter}}
         {{on "paste" this.onPaste}}
         {{on "keydown" this.onKeydown}}
         {{on "keyup" this.onKeyup}}
@@ -165,7 +173,7 @@ export default class SelectKitFilter extends Component {
       />
 
       {{#if this.selectKit.options.filterIcon}}
-        {{icon this.selectKit.options.filterIcon class="filter-icon"}}
+        {{dIcon this.selectKit.options.filterIcon class="filter-icon"}}
       {{/if}}
     {{/unless}}
   </template>

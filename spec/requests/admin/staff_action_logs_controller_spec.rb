@@ -87,7 +87,10 @@ RSpec.describe Admin::StaffActionLogsController do
     end
 
     context "when logged in as an admin" do
-      before { sign_in(admin) }
+      before do
+        admin.update!(last_seen_at: 1.day.ago)
+        sign_in(admin)
+      end
 
       include_examples "staff action logs accessible"
 
@@ -128,8 +131,40 @@ RSpec.describe Admin::StaffActionLogsController do
         expect(response.parsed_body["staff_action_logs"].first["details"]).to include(pm.title)
       end
 
+      describe "reviewable_id" do
+        it "is included when the staff action log is linked to a reviewable" do
+          reviewable = Fabricate(:reviewable_queued_post_topic)
+          UserHistory.create!(
+            action: UserHistory.actions[:post_approved],
+            acting_user_id: admin.id,
+            reviewable_id: reviewable.id,
+          )
+
+          get "/admin/logs/staff_action_logs.json",
+              params: {
+                action_id: UserHistory.actions[:post_approved],
+              }
+
+          expect(response.parsed_body["staff_action_logs"].first["reviewable_id"]).to eq(
+            reviewable.id,
+          )
+        end
+
+        it "is omitted when the staff action log has no reviewable" do
+          StaffActionLogger.new(admin).log_site_setting_change("title", "old", "new")
+
+          get "/admin/logs/staff_action_logs.json",
+              params: {
+                action_id: UserHistory.actions[:change_site_setting],
+              }
+
+          expect(response.parsed_body["staff_action_logs"].first).not_to have_key("reviewable_id")
+        end
+      end
+
       context "when staff actions are extended" do
         let(:plugin_extended_action) { :confirmed_ham }
+
         before { UserHistory.stubs(:staff_actions).returns([plugin_extended_action]) }
         after { UserHistory.unstub(:staff_actions) }
 
@@ -327,7 +362,7 @@ RSpec.describe Admin::StaffActionLogsController do
         parsed = response.parsed_body
 
         name_diff = <<-HTML
-          <h3>name</h3><p></p><table class="markdown"><tr><td class="diff-del"><del>#{tag_group1.name}</del></td><td class="diff-ins"><ins>#{tag_group2.name}</ins></td></tr></table>
+          <h3>name</h3><p></p><table class="markdown"><tr><td class="--previous"><del>#{tag_group1.name}</del></td><td class="--current"><ins>#{tag_group2.name}</ins></td></tr></table>
         HTML
         expect(parsed["side_by_side"]).to include(name_diff.strip)
         expect(parsed["side_by_side"]).to include("<del>#{tag1.name}</del>")
@@ -377,7 +412,10 @@ RSpec.describe Admin::StaffActionLogsController do
     end
 
     context "when logged in as an admin" do
-      before { sign_in(admin) }
+      before do
+        admin.update!(last_seen_at: 1.day.ago)
+        sign_in(admin)
+      end
 
       include_examples "theme diffs accessible"
       include_examples "tag_group diffs accessible"
@@ -387,6 +425,31 @@ RSpec.describe Admin::StaffActionLogsController do
         StaffActionLogger.new(admin).log_theme_destroy(theme)
         get "/admin/logs/staff_action_logs/#{UserHistory.last.id}/diff.json"
         expect(response.status).to eq(200)
+      end
+
+      it "falls back when diff generation exceeds the comparison budget" do
+        theme = Fabricate(:theme)
+        theme.set_field(target: :mobile, name: :scss, value: "body {.up}")
+        original_json =
+          ThemeSerializer.new(theme, root: false, include_theme_field_values: true).to_json
+        theme.set_field(target: :mobile, name: :scss, value: "body {.down}")
+        record = StaffActionLogger.new(Discourse.system_user).log_theme_change(original_json, theme)
+
+        ONPDiff
+          .any_instance
+          .stubs(:compose)
+          .raises(
+            ONPDiff::DiffLimitExceeded.new(
+              comparisons_used: 1,
+              comparison_budget: 0,
+              left_size: 1,
+              right_size: 1,
+            ),
+          )
+
+        get "/admin/logs/staff_action_logs/#{record.id}/diff.json"
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["side_by_side"]).to include(I18n.t("errors.diff_too_complex"))
       end
     end
 

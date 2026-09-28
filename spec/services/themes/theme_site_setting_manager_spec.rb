@@ -72,7 +72,7 @@ RSpec.describe Themes::ThemeSiteSettingManager do
         ).to(false)
       end
 
-      it "should publish changes to clients for client site settings" do
+      it "publishes client site-setting changes" do
         message = MessageBus.track_publish("/client_settings") { result }.first
         expect(message.data).to eq(
           { name: :enable_welcome_banner, scoped_to: { theme_id: theme.id }, value: false },
@@ -121,7 +121,7 @@ RSpec.describe Themes::ThemeSiteSettingManager do
         ).to(false)
       end
 
-      it "should publish changes to clients for client site settings" do
+      it "publishes client site-setting changes" do
         message = MessageBus.track_publish("/client_settings") { result }.first
         expect(message.data).to eq(
           { name: :enable_welcome_banner, scoped_to: { theme_id: theme.id }, value: false },
@@ -138,7 +138,7 @@ RSpec.describe Themes::ThemeSiteSettingManager do
       end
     end
 
-    context "when removing a theme site setting by ommitting the value" do
+    context "when removing a theme site setting by omitting the value" do
       let!(:theme_site_setting) do
         Fabricate(
           :theme_site_setting_with_service,
@@ -173,7 +173,7 @@ RSpec.describe Themes::ThemeSiteSettingManager do
         ).to(true)
       end
 
-      it "should publish changes to clients for client site settings" do
+      it "publishes client site-setting changes" do
         message = MessageBus.track_publish("/client_settings") { result }.first
         expect(message.data).to eq(
           { name: :enable_welcome_banner, scoped_to: { theme_id: theme.id }, value: true },

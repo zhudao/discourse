@@ -1,8 +1,9 @@
 # frozen_string_literal: true
 
-RSpec.describe "Glimmer Header", type: :system do
+RSpec.describe "Glimmer Header" do
   let(:header) { PageObjects::Pages::Header.new }
   let(:search) { PageObjects::Pages::Search.new }
+
   fab!(:current_user, :user)
   fab!(:topic)
 

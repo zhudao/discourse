@@ -1,13 +1,8 @@
 import Component from "@glimmer/component";
 import { array, fn, hash } from "@ember/helper";
-import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import { LinkTo } from "@ember/routing";
-import DButton from "discourse/components/d-button";
-import concatClass from "discourse/helpers/concat-class";
-import withEventValue from "discourse/helpers/with-event-value";
 import TagGroupChooser from "discourse/select-kit/components/tag-group-chooser";
-import { eq } from "discourse/truth-helpers";
 import { i18n } from "discourse-i18n";
 
 export default class UpsertCategoryTags extends Component {
@@ -17,10 +12,6 @@ export default class UpsertCategoryTags extends Component {
 
   get allowedTagGroups() {
     return this.args.transientData?.allowed_tag_groups;
-  }
-
-  get requiredTagGroups() {
-    return this.args.transientData?.required_tag_groups ?? [];
   }
 
   get disableAllowGlobalTags() {
@@ -36,138 +27,131 @@ export default class UpsertCategoryTags extends Component {
   }
 
   @action
-  onTagGroupChange(rtgIndex, valueArray) {
-    // A little strange, but we're using a multi-select component
-    // to select a single tag group. This action takes the array
-    // and extracts the first value in it.
-    const newRequiredTagGroups = this.requiredTagGroups.map((rtg, idx) =>
-      idx === rtgIndex ? { ...rtg, name: valueArray[0] } : rtg
-    );
-    this.args.form.set("required_tag_groups", newRequiredTagGroups);
-  }
-
-  @action
-  onMinCountChange(rtgIndex, value) {
-    const newRequiredTagGroups = this.requiredTagGroups.map((rtg, idx) =>
-      idx === rtgIndex ? { ...rtg, min_count: value } : rtg
-    );
-    this.args.form.set("required_tag_groups", newRequiredTagGroups);
-  }
-
-  @action
-  addRequiredTagGroup() {
-    const newRequiredTagGroups = [...this.requiredTagGroups, { min_count: 1 }];
-    this.args.form.set("required_tag_groups", newRequiredTagGroups);
-  }
-
-  @action
-  deleteRequiredTagGroup(rtgIndex) {
-    const newRequiredTagGroups = this.requiredTagGroups.filter(
-      (_, idx) => idx !== rtgIndex
-    );
-    this.args.form.set("required_tag_groups", newRequiredTagGroups);
+  onTagGroupFieldChange(field, valueArray) {
+    field.set(valueArray[0]);
   }
 
   <template>
-    <@form.Section
-      class={{concatClass
-        "edit-category-tab"
-        "edit-category-tab-tags"
-        (if (eq @selectedTab "tags") "active")
+    <@form.Field
+      @name="minimum_required_tags"
+      @title={{i18n "category.minimum_required_tags"}}
+      @type="input-number"
+      as |field|
+    >
+      <field.Control id="category-minimum-tags" min="0" />
+    </@form.Field>
+
+    <@form.Field
+      @format="max"
+      @name="allowed_tags"
+      @title={{if
+        @category.id
+        (i18n "category.tags_allowed_tags" categoryName=@category.name)
+        (i18n "category.tags_allowed_tags_new_category")
+      }}
+      @type="tag-chooser"
+      as |field|
+    >
+      <field.Control
+        @excludeSynonyms={{true}}
+        @placeholder="category.tags_placeholder"
+        @showAllTags={{true}}
+        @unlimited={{true}}
+      />
+    </@form.Field>
+
+    <@form.Container
+      @direction="column"
+      @format="full"
+      @optional={{true}}
+      @title={{if
+        @category.id
+        (i18n "category.tags_allowed_tag_groups" categoryName=@category.name)
+        (i18n "category.tags_allowed_tag_groups_new_category")
       }}
     >
-      <@form.Field
-        @name="minimum_required_tags"
-        @title={{i18n "category.minimum_required_tags"}}
-        @format="large"
-        as |field|
-      >
-        <field.Input type="number" min="0" id="category-minimum-tags" />
-      </@form.Field>
+      <TagGroupChooser
+        @id="category-allowed-tag-groups"
+        @onChange={{this.onAllowedTagGroupsChange}}
+        @tagGroups={{this.allowedTagGroups}}
+      />
+      <LinkTo class="manage-tag-groups" @route="tagGroups">
+        {{i18n "category.manage_tag_groups_link"}}
+      </LinkTo>
+    </@form.Container>
 
-      <@form.Field
-        @name="allowed_tags"
-        @title={{if
-          @category.id
-          (i18n "category.tags_allowed_tags" categoryName=@category.name)
-          (i18n "category.tags_allowed_tags_new_category")
-        }}
-        @format="large"
-        as |field|
-      >
-        <field.TagChooser
-          @showAllTags={{true}}
-          @excludeSynonyms={{true}}
-          @unlimited={{true}}
-          @placeholder="category.tags_placeholder"
-        />
-      </@form.Field>
+    <@form.Field
+      @disabled={{this.disableAllowGlobalTags}}
+      @format="max"
+      @name="allow_global_tags"
+      @title={{i18n "category.allow_global_tags_label"}}
+      @type="checkbox"
+      as |field|
+    >
+      <field.Control />
+    </@form.Field>
 
-      <@form.Container
-        @direction="column"
-        @optional={{true}}
-        @title={{if
-          @category.id
-          (i18n "category.tags_allowed_tag_groups" categoryName=@category.name)
-          (i18n "category.tags_allowed_tag_groups_new_category")
-        }}
-      >
-        <TagGroupChooser
-          @id="category-allowed-tag-groups"
-          @tagGroups={{this.allowedTagGroups}}
-          @onChange={{this.onAllowedTagGroupsChange}}
-        />
-        <LinkTo @route="tagGroups" class="manage-tag-groups">
-          {{i18n "category.manage_tag_groups_link"}}
-        </LinkTo>
-      </@form.Container>
+    <@form.Alert @type="info">
+      {{i18n "category.tags_tab_description"}}
+    </@form.Alert>
 
-      <@form.Field
-        @name="allow_global_tags"
-        @title={{i18n "category.allow_global_tags_label"}}
-        @format="large"
-        @disabled={{this.disableAllowGlobalTags}}
-        as |field|
-      >
-        <field.Checkbox />
-      </@form.Field>
+    <@form.Section @title={{i18n "category.required_tag_group.description"}}>
+      <@form.Collection @name="required_tag_groups" as |collection index|>
+        <@form.Row as |row|>
+          <row.Col @size={{2}}>
+            <collection.Field
+              @name="min_count"
+              @title={{i18n "category.required_tag_group.min_count"}}
+              @type="input-number"
+              @validation="required"
+              as |field|
+            >
+              <field.Control min="1" />
+            </collection.Field>
+          </row.Col>
 
-      <@form.Alert @type="info">
-        {{i18n "category.tags_tab_description"}}
-      </@form.Alert>
+          <row.Col @size={{9}}>
+            <collection.Field
+              @name="name"
+              @title={{i18n "category.required_tag_group.tag_group"}}
+              @type="custom"
+              @validation="required"
+              as |field|
+            >
+              <field.Control>
+                <TagGroupChooser
+                  @onChange={{fn this.onTagGroupFieldChange field}}
+                  @options={{hash
+                    maximum=1
+                    filterPlaceholder="category.required_tag_group.placeholder"
+                  }}
+                  @tagGroups={{if field.value (array field.value) (array)}}
+                />
+              </field.Control>
+            </collection.Field>
+          </row.Col>
 
-      <@form.Section @title={{i18n "category.required_tag_group.description"}}>
-        {{#each this.requiredTagGroups as |rtg index|}}
-          <div class="required-tag-group-row">
-            <input
-              type="number"
-              min="1"
-              value={{rtg.min_count}}
-              {{on "input" (withEventValue (fn this.onMinCountChange index))}}
-            />
-            <TagGroupChooser
-              @tagGroups={{if rtg.name (array rtg.name) (array)}}
-              @onChange={{fn this.onTagGroupChange index}}
-              @options={{hash
-                maximum=1
-                filterPlaceholder="category.required_tag_group.placeholder"
-              }}
-            />
-            <DButton
-              @label="category.required_tag_group.delete"
-              @action={{fn this.deleteRequiredTagGroup index}}
+          <row.Col @size={{1}}>
+            <@form.Button
+              class="btn-danger delete-required-tag-group"
+              @action={{fn collection.remove index}}
               @icon="trash-can"
-              class="delete-required-tag-group"
+              @title="category.required_tag_group.delete"
             />
-          </div>
-        {{/each}}
-        <DButton
-          @label="category.required_tag_group.add"
-          @action={{this.addRequiredTagGroup}}
-          @icon="plus"
-          class="btn-default add-required-tag-group"
-        />
-      </@form.Section>
+          </row.Col>
+        </@form.Row>
+      </@form.Collection>
+
+      <@form.Button
+        class="btn-default add-required-tag-group"
+        @action={{fn
+          @form.addItemToCollection
+          "required_tag_groups"
+          (hash min_count=1)
+        }}
+        @icon="plus"
+        @label="category.required_tag_group.add"
+      />
     </@form.Section>
   </template>
 }

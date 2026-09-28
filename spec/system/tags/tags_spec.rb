@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-describe "Tags", type: :system do
+describe "Tags" do
   fab!(:user_tl1) { Fabricate(:user, trust_level: TrustLevel[1]) }
   fab!(:user_tl2) { Fabricate(:user, trust_level: TrustLevel[2]) }
   fab!(:user_tl3) { Fabricate(:user, trust_level: TrustLevel[3]) }
@@ -91,7 +91,7 @@ describe "Tags", type: :system do
 
       # /latest
       expect(discovery.topic_list).to have_topic_tag(topic_with_one_tag, "tag-one")
-      expect(discovery.topic_list).to have_topic_tags(topic_with_two_tags, "tag-one", "tag-two")
+      expect(discovery.topic_list).to have_topic_tags(topic_with_two_tags, tags: [tag_one, tag_two])
       expect(discovery.topic_list).to have_no_topic_tags(topic_with_no_tags)
       expect(discovery.tag_drop).to have_selected_name("tags") # unselected
 
@@ -147,6 +147,56 @@ describe "Tags", type: :system do
       sidebar.click_section_link(tag_one.name)
       expect(page).to have_current_path("/tag/#{tag_one.slug}/#{tag_one.id}")
       expect(discovery.topic_list).to have_topic(topic_with_one_tag)
+    end
+
+    it "highlights the selected tag in the tag-drop dropdown" do
+      ditto = Fabricate(:tag, name: "ditto")
+      bulbasaur = Fabricate(:tag, name: "bulbasaur")
+      sprigatito = Fabricate(:tag, name: "sprigatito")
+      tag_category = Fabricate(:category)
+
+      [ditto, bulbasaur, sprigatito].each do |tag|
+        Fabricate(:topic, category: tag_category, tags: [tag]).tap do |t|
+          Fabricate(:post, topic: t)
+        end
+      end
+      CategoryTagStat.update_topic_counts
+
+      sign_in(user_tl1)
+
+      # visit tag page, tag-drop should highlight the active tag
+      tag_page.visit_tag(ditto)
+      discovery.tag_drop.expand
+      expect(discovery.tag_drop).to have_selected_row_name("ditto")
+
+      # search for the active tag, result should still be highlighted
+      discovery.tag_drop.search(ditto.name)
+      expect(discovery.tag_drop).to have_selected_row_name("ditto")
+
+      # search for a different tag, no row should be highlighted
+      discovery.tag_drop.search(bulbasaur.name)
+      expect(discovery.tag_drop).to have_no_selected_row
+
+      # select a different tag, navigate, verify new selection
+      discovery.tag_drop.select_row_by_name("bulbasaur")
+      expect(page).to have_current_path("/tag/#{bulbasaur.slug}/#{bulbasaur.id}")
+
+      discovery.tag_drop.expand
+      expect(discovery.tag_drop).to have_selected_row_name("bulbasaur")
+
+      # "remove filter" navigates back with no selected tag
+      discovery.tag_drop.select_row_by_value("all-tags")
+      expect(page).to have_current_path("/")
+
+      discovery.tag_drop.expand
+      expect(discovery.tag_drop).to have_no_selected_row
+
+      # "no tags" filter shows untagged topics
+      discovery.tag_drop.select_row_by_value("no-tags")
+      expect(page).to have_current_path("/tag/none")
+
+      discovery.tag_drop.expand
+      expect(discovery.tag_drop).to have_no_selected_row
     end
 
     it "filters to untagged topics when selecting 'no tags' from tag drop" do
@@ -355,6 +405,50 @@ describe "Tags", type: :system do
       expect(composer_tag_chooser).to have_option_name("cap-approved")
       expect(composer_tag_chooser).to have_option_name("cap-closed")
       expect(composer_tag_chooser).to have_option_name("cap-open")
+    end
+  end
+
+  describe "tag names with periods" do
+    let(:discovery) { PageObjects::Pages::Discovery.new }
+    let(:topic_page) { PageObjects::Pages::Topic.new }
+
+    fab!(:node_tag) { Fabricate(:tag, name: "node.js") }
+    fab!(:node_topic) do
+      Fabricate(:topic, title: "Tagged with node.js example", tags: [node_tag]).tap do |t|
+        Fabricate(:post, topic: t)
+      end
+    end
+
+    before { SearchIndexer.enable }
+    after { SearchIndexer.disable }
+
+    it "renders the period verbatim through list, topic, tag page, and search" do
+      SearchIndexer.update_tags_index(node_tag.id, node_tag.name)
+
+      sign_in(user_tl1)
+
+      visit "/latest"
+      expect(discovery.topic_list).to have_topic_tag(node_topic, "node.js")
+
+      discovery.topic_list.click_topic_title(node_topic)
+      expect(topic_page).to have_topic_title("Tagged with node.js example")
+      expect(topic_page.topic_tags).to include("node.js")
+
+      find(".title-wrapper .discourse-tag", text: "node.js").click
+
+      expect(page).to have_current_path("/tag/#{node_tag.slug}/#{node_tag.id}")
+      expect(discovery.topic_list).to have_topic(node_topic)
+
+      visit "/search?q=node&search_type=categories_tags"
+
+      expect(page).to have_selector(
+        ".fps-tag-item a[href=\"/tag/#{node_tag.slug}/#{node_tag.id}\"]",
+        text: "node.js",
+      )
+
+      find(".fps-tag-item a", text: "node.js").click
+
+      expect(page).to have_current_path("/tag/#{node_tag.slug}/#{node_tag.id}")
     end
   end
 end

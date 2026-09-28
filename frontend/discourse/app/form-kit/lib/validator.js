@@ -78,6 +78,10 @@ export default class Validator {
   }
 
   betweenValidator(value, rule) {
+    if (isBlank(value)) {
+      return;
+    }
+
     if (rule.max) {
       if (value > rule.max) {
         return i18n("form_kit.errors.too_high", {
@@ -121,6 +125,7 @@ export default class Validator {
     let error = false;
 
     switch (type) {
+      case "input":
       case "input-text":
         if (rule.trim) {
           value = value?.trim();
@@ -140,7 +145,7 @@ export default class Validator {
         }
         break;
       case "checkbox":
-        if (value !== true) {
+        if (![true, "true"].includes(value)) {
           error = true;
         }
         break;

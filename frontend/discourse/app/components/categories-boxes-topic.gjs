@@ -1,18 +1,18 @@
 /* eslint-disable ember/no-classic-components */
 import Component from "@ember/component";
-import { htmlSafe } from "@ember/template";
+import { computed } from "@ember/object";
+import { trustHTML } from "@ember/template";
 import { tagName } from "@ember-decorators/component";
-import icon from "discourse/helpers/d-icon";
-import discourseComputed from "discourse/lib/decorators";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
 
 @tagName("")
 export default class CategoriesBoxesTopic extends Component {
-  @discourseComputed("topic.pinned", "topic.closed", "topic.archived")
-  topicStatusIcon(pinned, closed, archived) {
-    if (pinned) {
+  @computed("topic.pinned", "topic.closed", "topic.archived")
+  get topicStatusIcon() {
+    if (this.topic?.pinned) {
       return "thumbtack";
     }
-    if (closed || archived) {
+    if (this.topic?.closed || this.topic?.archived) {
       return "category.restricted";
     }
     return "far-file-lines";
@@ -20,10 +20,10 @@ export default class CategoriesBoxesTopic extends Component {
 
   <template>
     <li data-topic-id={{this.topic.id}} ...attributes>
-      {{icon this.topicStatusIcon}}
+      {{dIcon this.topicStatusIcon}}
 
-      <a href={{this.topic.lastUnreadUrl}} class="title">
-        {{htmlSafe this.topic.fancyTitle}}
+      <a class="title" href={{this.topic.lastUnreadUrl}}>
+        {{trustHTML this.topic.fancyTitle}}
       </a>
     </li>
   </template>

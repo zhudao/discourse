@@ -2,7 +2,7 @@ import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
-import { htmlSafe } from "@ember/template";
+import { trustHTML } from "@ember/template";
 import { isEmpty } from "@ember/utils";
 import TopicNotificationsTracking from "discourse/components/topic-notifications-tracking";
 import getURL from "discourse/lib/get-url";
@@ -13,7 +13,7 @@ const ParagraphWrapper = <template>
   <p class="reason">{{yield}}</p>
 </template>;
 const EmptyWrapper = <template>
-  {{! template-lint-disable no-yield-only}}{{yield}}
+  {{! eslint-disable ember/template-no-yield-only }}{{yield}}
 </template>;
 
 export default class TopicNotificationsButton extends Component {
@@ -57,6 +57,29 @@ export default class TopicNotificationsButton extends Component {
     }
   }
 
+  get conditionalWrapper() {
+    if (this.args.expanded) {
+      return ParagraphWrapper;
+    } else {
+      return EmptyWrapper;
+    }
+  }
+
+  @action
+  async changeTopicNotificationLevel(levelId) {
+    if (levelId === this.notificationLevel) {
+      return;
+    }
+
+    this.isLoading = true;
+
+    try {
+      await this.args.topic.details.updateNotifications(levelId);
+    } finally {
+      this.isLoading = false;
+    }
+  }
+
   // The user may have changed their category or tag tracking settings
   // since this topic was tracked/watched based on those settings in the
   // past. In that case we need to alter the reason message we show them
@@ -93,43 +116,20 @@ export default class TopicNotificationsButton extends Component {
     return false;
   }
 
-  get conditionalWrapper() {
-    if (this.args.expanded) {
-      return ParagraphWrapper;
-    } else {
-      return EmptyWrapper;
-    }
-  }
-
-  @action
-  async changeTopicNotificationLevel(levelId) {
-    if (levelId === this.notificationLevel) {
-      return;
-    }
-
-    this.isLoading = true;
-
-    try {
-      await this.args.topic.details.updateNotifications(levelId);
-    } finally {
-      this.isLoading = false;
-    }
-  }
-
   <template>
     <div class="topic-notifications-button" ...attributes>
       <this.conditionalWrapper>
         <TopicNotificationsTracking
+          @contentClass={{@contentClass}}
           @levelId={{this.notificationLevel}}
           @onChange={{this.changeTopicNotificationLevel}}
-          @showFullTitle={{@expanded}}
           @showCaret={{@expanded}}
+          @showFullTitle={{@expanded}}
           @topic={{@topic}}
-          @contentClass={{@contentClass}}
         />
 
         {{#if @expanded}}
-          <span class="text">{{htmlSafe this.reasonText}}</span>
+          <span class="text">{{trustHTML this.reasonText}}</span>
         {{/if}}
       </this.conditionalWrapper>
     </div>

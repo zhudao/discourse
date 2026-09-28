@@ -14,28 +14,19 @@ module DiscourseAi
           llm_model.provider == "aws_bedrock"
         end
 
+        def self.requires_configured_url?
+          false
+        end
+
         def default_options(dialect)
           options =
             if dialect.is_a?(DiscourseAi::Completions::Dialects::Claude)
               max_tokens = 4096
               max_tokens = 8192 if bedrock_model_id.match?(/3.[57]/)
 
-              result = { anthropic_version: "bedrock-2023-05-31" }
-              if llm_model.lookup_custom_param("enable_reasoning")
-                # we require special headers to go over 64k output tokens, lets
-                # wait for feature requests before enabling this
-                reasoning_tokens =
-                  llm_model.lookup_custom_param("reasoning_tokens").to_i.clamp(1024, 32_768)
-
-                # this allows for ample tokens beyond reasoning
-                max_tokens = reasoning_tokens + 30_000
-                result[:thinking] = { type: "enabled", budget_tokens: reasoning_tokens }
-              end
-              result[:max_tokens] = max_tokens
-
-              # effort parameter
-              effort = llm_model.lookup_custom_param("effort")
-              result[:output_config] = { effort: effort } if %w[low medium high].include?(effort)
+              result = { anthropic_version: "bedrock-2023-05-31", max_tokens: max_tokens }
+              apply_anthropic_thinking_config!(result)
+              apply_anthropic_effort_config!(result)
 
               result
             else
@@ -48,6 +39,10 @@ module DiscourseAi
         end
 
         private
+
+        def supports_anthropic_thinking?
+          bedrock_model_id.include?("anthropic") || bedrock_model_id.include?("claude")
+        end
 
         def bedrock_model_id
           case llm_model.name
@@ -90,13 +85,20 @@ module DiscourseAi
 
         def model_uri
           region = llm_model.lookup_custom_param("region")
+          inference_profile_arn = llm_model.lookup_custom_param("inference_profile_arn")
 
-          if region.blank? || bedrock_model_id.blank?
+          model_id =
+            if inference_profile_arn.present?
+              URI.encode_www_form_component(inference_profile_arn)
+            else
+              bedrock_model_id
+            end
+
+          if region.blank? || model_id.blank?
             raise CompletionFailed.new(I18n.t("discourse_ai.llm_models.bedrock_invalid_url"))
           end
 
-          api_url =
-            "https://bedrock-runtime.#{region}.amazonaws.com/model/#{bedrock_model_id}/invoke"
+          api_url = "https://bedrock-runtime.#{region}.amazonaws.com/model/#{model_id}/invoke"
 
           api_url = @streaming_mode ? (api_url + "-with-response-stream") : api_url
 
@@ -113,19 +115,6 @@ module DiscourseAi
           else
             raise "Unsupported dialect"
           end
-        end
-
-        def apply_tool_choice(payload, dialect, prompt)
-          return if dialect.tool_choice.blank?
-          if dialect.tool_choice != :none
-            payload[:tool_choice] = { type: "tool", name: prompt.tool_choice }
-          end
-          # tool_choice: {type: "none"} not supported on Bedrock — handled by apply_tool_choice_none
-        end
-
-        def apply_tool_choice_none(payload, dialect)
-          no_tool_text = dialect.no_more_tool_calls_text_user
-          payload[:messages] << { role: "user", content: no_tool_text } if no_tool_text.present?
         end
 
         def prepare_request(payload)

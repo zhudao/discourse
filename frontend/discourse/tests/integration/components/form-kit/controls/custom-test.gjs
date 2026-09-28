@@ -12,10 +12,16 @@ module(
       await render(
         <template>
           <Form as |form|>
-            <form.Field @name="foo" @title="Foo" @description="Bar" as |field|>
-              <field.Custom>
+            <form.Field
+              @description="Bar"
+              @name="foo"
+              @title="Foo"
+              @type="custom"
+              as |field|
+            >
+              <field.Control>
                 <input class="custom-test" />
-              </field.Custom>
+              </field.Control>
             </form.Field>
           </Form>
         </template>

@@ -1,20 +1,24 @@
-import discourseComputed from "discourse/lib/decorators";
+import RestCompatModel from "discourse/data/rest-compat";
+import { TagGroupSchema } from "discourse/data/schemas/tag-group";
+import { defineFieldForwarders } from "discourse/data/warp-rest-model";
 import PermissionType from "discourse/models/permission-type";
-import RestModel from "discourse/models/rest";
 
-export default class TagGroup extends RestModel {
-  @discourseComputed("permissions")
-  permissionName(permissions) {
-    if (!permissions) {
+export default class TagGroup extends RestCompatModel {
+  static type = "tag-group";
+
+  get permissionName() {
+    if (!this.permissions) {
       return "public";
     }
 
-    if (permissions[0] === PermissionType.FULL) {
+    if (this.permissions[0] === PermissionType.FULL) {
       return "public";
-    } else if (permissions[0] === PermissionType.READONLY) {
+    } else if (this.permissions[0] === PermissionType.READONLY) {
       return "visible";
     } else {
       return "private";
     }
   }
 }
+
+defineFieldForwarders(TagGroup, TagGroupSchema);

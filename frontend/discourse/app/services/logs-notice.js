@@ -1,10 +1,10 @@
 /* eslint-disable ember/no-observers */
-import { readOnly } from "@ember/object/computed";
+import { computed } from "@ember/object";
 import Service, { service } from "@ember/service";
-import { htmlSafe } from "@ember/template";
+import { trustHTML } from "@ember/template";
 import { isEmpty } from "@ember/utils";
 import { observes } from "@ember-decorators/object";
-import discourseComputed, { bind } from "discourse/lib/decorators";
+import { bind } from "discourse/lib/decorators";
 import { autoUpdatingRelativeAge } from "discourse/lib/formatter";
 import getURL from "discourse/lib/get-url";
 import I18n from "discourse-i18n";
@@ -18,8 +18,6 @@ export default class LogsNoticeService extends Service {
   @service messageBus;
 
   text = "";
-
-  @readOnly("currentUser.admin") isAdmin;
 
   init() {
     super.init(...arguments);
@@ -48,6 +46,26 @@ export default class LogsNoticeService extends Service {
     );
   }
 
+  @computed("currentUser.admin")
+  get isAdmin() {
+    return this.currentUser?.admin;
+  }
+
+  @computed("text")
+  get isEmpty() {
+    return isEmpty(this.text);
+  }
+
+  @computed("text")
+  get message() {
+    return trustHTML(this.text);
+  }
+
+  @computed("isEmpty", "isAdmin")
+  get hidden() {
+    return !this.isAdmin || this.isEmpty;
+  }
+
   @bind
   onLogRateLimit(data) {
     const { duration, rate } = data;
@@ -71,21 +89,6 @@ export default class LogsNoticeService extends Service {
         url: getURL("/logs"),
       })
     );
-  }
-
-  @discourseComputed("text")
-  isEmpty(text) {
-    return isEmpty(text);
-  }
-
-  @discourseComputed("text")
-  message(text) {
-    return htmlSafe(text);
-  }
-
-  @discourseComputed("isEmpty", "isAdmin")
-  hidden(thisIsEmpty, isAdmin) {
-    return !isAdmin || thisIsEmpty;
   }
 
   @observes("text")

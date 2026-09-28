@@ -12,7 +12,13 @@ module DiscourseAi
         log = AiApiAuditLog.find(params[:id])
         raise Discourse::NotFound if !log.topic
 
-        guardian.ensure_can_debug_ai_bot_conversation!(log.topic)
+        if log.post_id.present?
+          raise Discourse::NotFound if !log.post
+
+          guardian.ensure_can_debug_ai_bot_conversation!(log.post)
+        else
+          guardian.ensure_can_debug_ai_bot_conversation!(log.topic)
+        end
         render json: AiApiAuditLogSerializer.new(log, root: false), status: :ok
       end
 
@@ -22,11 +28,21 @@ module DiscourseAi
 
         posts =
           Post
+            .secured(guardian)
             .where("post_number <= ?", post.post_number)
             .where(topic_id: post.topic_id)
             .order("post_number DESC")
 
-        debug_info = AiApiAuditLog.where(post: posts).order(created_at: :desc).first
+        visible_post_ids = posts.select(:id)
+
+        # topic-scoped logs (eg. title generation) are created after the reply's
+        # own log, so prefer the clicked post's log over plain recency
+        debug_info =
+          AiApiAuditLog
+            .where(topic_id: post.topic_id)
+            .where("post_id IS NULL OR post_id IN (?)", visible_post_ids)
+            .order(Arel.sql("post_id = #{post.id.to_i} DESC NULLS LAST"), created_at: :desc)
+            .first
 
         render json: AiApiAuditLogSerializer.new(debug_info, root: false), status: :ok
       end
@@ -63,13 +79,20 @@ module DiscourseAi
 
         guardian.ensure_can_see!(prompt_post)
 
-        persona_id = retry_persona_id(post, prompt_post)
+        agent_id = retry_agent_id(post, prompt_post)
         llm_model_id = post.custom_fields[DiscourseAi::AiBot::POST_AI_LLM_MODEL_ID_FIELD]
+        authorization_user_id =
+          post.custom_fields[DiscourseAi::AiBot::POST_AI_AGENT_AUTHORIZATION_USER_ID_FIELD].presence
+        authorization_user_id = authorization_user_id.to_i if authorization_user_id
+        authorization_user_id ||= prompt_post.topic.user_id
+        raise Discourse::InvalidAccess if authorization_user_id.blank?
 
         args = {
           post_id: prompt_post.id,
           bot_user_id: post.user_id,
-          persona_id: persona_id,
+          agent_id: agent_id,
+          authorization_user_id: authorization_user_id,
+          visibility_user_id: current_user.id,
           reply_post_id: post.id,
         }
 
@@ -101,19 +124,18 @@ module DiscourseAi
           .first
       end
 
-      def retry_persona_id(bot_reply_post, prompt_post)
-        persona_id =
-          bot_reply_post.custom_fields[DiscourseAi::AiBot::POST_AI_PERSONA_ID_FIELD].presence
+      def retry_agent_id(bot_reply_post, prompt_post)
+        agent_id = bot_reply_post.custom_fields[DiscourseAi::AiBot::POST_AI_AGENT_ID_FIELD].presence
 
-        persona_id ||= prompt_post.topic.custom_fields["ai_persona_id"].presence
+        agent_id ||= prompt_post.topic.custom_fields["ai_agent_id"].presence
 
-        if persona_id.blank?
-          persona_name = prompt_post.topic.custom_fields["ai_persona"].presence
-          persona_id = AiPersona.find_by(name: persona_name)&.id if persona_name.present?
+        if agent_id.blank?
+          agent_name = prompt_post.topic.custom_fields["ai_agent"].presence
+          agent_id = AiAgent.find_by(name: agent_name)&.id if agent_name.present?
         end
 
-        persona_id ||= DiscourseAi::Personas::General.id
-        persona_id.to_i
+        agent_id ||= DiscourseAi::Agents::Agent.system_agents[DiscourseAi::Agents::General]
+        agent_id.to_i
       end
     end
   end

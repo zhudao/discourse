@@ -115,7 +115,7 @@ el:
     track_selector:
       reset_trigger: "έναρξη"
       skip_trigger: "παράλειψη"
-      help_trigger: "βοήθεια"
+      help_trigger: "εμφάνιση βοήθειας"
       random_mention:
         reply: |-
           Γεια σας! Για να μάθετε τι μπορώ να κάνω, πείτε `@%{discobot_username} %{help_trigger}`.
@@ -133,6 +133,7 @@ el:
 
           `@%{discobot_username} %{magic_8_ball_trigger}`
           > :crystal_ball: Μπορείτε να βασιστείτε σε αυτό
+        discobot_disabled: Με έχετε απενεργοποιήσει στις προτιμήσεις σας. Πρέπει να επιτρέψετε στις συμβουλές ενσωμάτωσης νέων χρηστών να αλληλεπιδρούν μαζί μου.
       do_not_understand:
         first_response: |-
           Έι, ευχαριστώ για την απάντηση!

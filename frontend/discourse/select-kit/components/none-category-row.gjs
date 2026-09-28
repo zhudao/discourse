@@ -1,38 +1,38 @@
-import { htmlSafe } from "@ember/template";
+import { computed } from "@ember/object";
+import { trustHTML } from "@ember/template";
 import { classNames } from "@ember-decorators/component";
-import { categoryBadgeHTML } from "discourse/helpers/category-link";
-import dirSpan from "discourse/helpers/dir-span";
-import discourseComputed from "discourse/lib/decorators";
 import CategoryRowComponent from "discourse/select-kit/components/category-row";
+import { categoryBadgeHTML } from "discourse/ui-kit/helpers/d-category-link";
+import dDirSpan from "discourse/ui-kit/helpers/d-dir-span";
 
 @classNames("none category-row")
 export default class NoneCategoryRow extends CategoryRowComponent {
-  @discourseComputed("category")
-  badgeForCategory(category) {
-    return htmlSafe(
-      categoryBadgeHTML(category, {
+  @computed("category")
+  get badgeForCategory() {
+    return trustHTML(
+      categoryBadgeHTML(this.category, {
         link: false,
         allowUncategorized: true,
         hideParent: true,
-        ancestors: category?.predecessors,
+        ancestors: this.category?.predecessors,
       })
     );
   }
 
   <template>
     {{#if this.category}}
-      <div class="category-status" aria-hidden="true">
+      <div aria-hidden="true" class="category-status">
         {{this.badgeForCategory}}
       </div>
 
       {{#if this.shouldDisplayDescription}}
-        <div class="category-desc" aria-hidden="true">{{dirSpan
+        <div aria-hidden="true" class="category-desc">{{dDirSpan
             this.descriptionText
             htmlSafe="true"
           }}</div>
       {{/if}}
     {{else}}
-      {{htmlSafe this.label}}
+      {{trustHTML this.label}}
     {{/if}}
   </template>
 }

@@ -1,40 +1,46 @@
 /* eslint-disable ember/no-classic-components */
 import Component from "@ember/component";
-import { action } from "@ember/object";
-import { gt } from "@ember/object/computed";
+import { action, computed } from "@ember/object";
 import { service } from "@ember/service";
 import { tagName } from "@ember-decorators/component";
-import DButton from "discourse/components/d-button";
 import HistoryModal from "discourse/components/modal/history";
 import { historyHeat } from "discourse/components/post/meta-data/edits-indicator";
-import discourseComputed from "discourse/lib/decorators";
 import { longDate } from "discourse/lib/formatter";
+import DButton from "discourse/ui-kit/d-button";
 import { i18n } from "discourse-i18n";
 
 @tagName("")
 export default class ReviewablePostEdits extends Component {
   @service modal;
 
-  @gt("reviewable.post_version", 1) hasEdits;
-
-  @discourseComputed("reviewable.post_version")
-  editCount(postVersion) {
-    return postVersion - 1;
+  @computed("reviewable.post_version")
+  get hasEdits() {
+    return this.reviewable?.post_version > 1;
   }
 
-  @discourseComputed("reviewable.post_updated_at")
-  historyClass(updatedAt) {
-    return historyHeat(this.siteSettings, new Date(updatedAt));
+  @computed("reviewable.post_version")
+  get editCount() {
+    return this.reviewable?.post_version - 1;
   }
 
-  @discourseComputed("reviewable.post_updated_at")
-  editedDate(updatedAt) {
-    return longDate(updatedAt);
+  @computed("reviewable.post_updated_at")
+  get historyClass() {
+    return historyHeat(
+      this.siteSettings,
+      new Date(this.reviewable?.post_updated_at)
+    );
   }
 
-  @discourseComputed("reviewable.post_updated_at")
-  editedTitle(updatedAt) {
-    return i18n("post.last_edited_on", { dateTime: longDate(updatedAt) });
+  @computed("reviewable.post_updated_at")
+  get editedDate() {
+    return longDate(this.reviewable?.post_updated_at);
+  }
+
+  @computed("reviewable.post_updated_at")
+  get editedTitle() {
+    return i18n("post.last_edited_on", {
+      dateTime: longDate(this.reviewable?.post_updated_at),
+    });
   }
 
   @action
@@ -57,11 +63,11 @@ export default class ReviewablePostEdits extends Component {
     {{#if this.hasEdits}}
       <div class="post-info edits">
         <DButton
+          class="btn-icon-text btn-flat {{this.historyClass}}"
           @action={{this.showEditHistory}}
           @icon="pencil"
           @translatedLabel={{this.editCount}}
           @translatedTitle={{this.editedTitle}}
-          class="btn-icon-text btn-flat {{this.historyClass}}"
         />
       </div>
     {{/if}}

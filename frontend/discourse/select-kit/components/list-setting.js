@@ -1,5 +1,4 @@
 import { computed } from "@ember/object";
-import { readOnly } from "@ember/object/computed";
 import { classNames } from "@ember-decorators/component";
 import { uniqueItemsFromArray } from "discourse/lib/array-tools";
 import { makeArray } from "discourse/lib/helpers";
@@ -23,12 +22,9 @@ export default class ListSetting extends MultiSelectComponent {
   nameProperty = null;
   valueProperty = null;
 
-  @readOnly("choices") content;
-
-  modifyComponentForRow(collection) {
-    if (collection === MAIN_COLLECTION && this.settingName?.includes("color")) {
-      return CreateColorRow;
-    }
+  @computed("choices")
+  get content() {
+    return this.choices;
   }
 
   @computed("settingName")
@@ -37,6 +33,12 @@ export default class ListSetting extends MultiSelectComponent {
       return SelectedChoiceColor;
     } else {
       return SelectedChoice;
+    }
+  }
+
+  modifyComponentForRow(collection) {
+    if (collection === MAIN_COLLECTION && this.settingName?.includes("color")) {
+      return CreateColorRow;
     }
   }
 

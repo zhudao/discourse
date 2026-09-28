@@ -5,10 +5,10 @@ import didInsert from "@ember/render-modifiers/modifiers/did-insert";
 import didUpdate from "@ember/render-modifiers/modifiers/did-update";
 import { next } from "@ember/runloop";
 import { service } from "@ember/service";
-import { htmlSafe } from "@ember/template";
-import icon from "discourse/helpers/d-icon";
+import { trustHTML } from "@ember/template";
 import { uniqueItemsFromArray } from "discourse/lib/array-tools";
 import { not } from "discourse/truth-helpers";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
 import { i18n } from "discourse-i18n";
 
 export default class TagChooserField extends Component {
@@ -16,17 +16,19 @@ export default class TagChooserField extends Component {
   @service dialog;
 
   get formattedChoices() {
+    if (!this.args.choices) {
+      return [];
+    }
+
+    const tagChoices = this.args.attributes?.tag_choices || {};
+
     return this.args.choices.map((tag) => ({
       id: tag.id,
       name: tag.name,
-      display: this.args.attributes.tag_choices[tag.name]
-        ? this.args.attributes.tag_choices[tag.name]
-        : tag.name.replace(/-/g, " ").toUpperCase(),
+      display: tagChoices[tag.name]
+        ? tagChoices[tag.name]
+        : (tag.name || "").replace(/-/g, " ").toUpperCase(),
     }));
-  }
-
-  _tagId(tag) {
-    return typeof tag === "object" ? tag.id : null;
   }
 
   get filteredSelectedValues() {
@@ -39,6 +41,10 @@ export default class TagChooserField extends Component {
     return this.tags.filter((tag) =>
       this.args.choices.some((choice) => choice.id === this._tagId(tag))
     );
+  }
+
+  get tags() {
+    return this.composer.get("model.tags") || [];
   }
 
   @action
@@ -75,10 +81,6 @@ export default class TagChooserField extends Component {
     }
   }
 
-  get tags() {
-    return this.composer.get("model.tags") || [];
-  }
-
   @action
   syncWithComposerTags() {
     if (this.args.attributes.multiple) {
@@ -89,15 +91,19 @@ export default class TagChooserField extends Component {
   }
 
   @action
-  handleSelectedTagNames(event) {
+  handleSelectedValues(event) {
+    const nameByDisplay = new Map(
+      this.formattedChoices.map((choice) => [choice.display, choice.name])
+    );
+
     return Array.from(event.target.selectedOptions)
-      .map((option) => option.value)
-      .filter((name) => name !== "");
+      .map((option) => nameByDisplay.get(option.value))
+      .filter(Boolean);
   }
 
   @action
   handleInput(event) {
-    const selectedTagNames = this.handleSelectedTagNames(event);
+    const selectedTagNames = this.handleSelectedValues(event);
     const validTagNames = this.formattedChoices.map((choice) => choice.name);
     const filteredTagNames = selectedTagNames.filter((name) =>
       validTagNames.includes(name)
@@ -127,10 +133,14 @@ export default class TagChooserField extends Component {
     );
   }
 
+  _tagId(tag) {
+    return typeof tag === "object" ? tag.id : null;
+  }
+
   <template>
     <div
-      data-field-type="multi-select"
       class="control-group form-template-field"
+      data-field-type="multi-select"
       {{didInsert this.syncWithComposerTags}}
       {{! not ideal but we would need a lot of re-architecturing to make the form dynamic }}
       {{didUpdate this.syncWithComposerTags this.composer.model.tags}}
@@ -139,36 +149,36 @@ export default class TagChooserField extends Component {
         <label class="form-template-field__label">
           {{@attributes.label}}
           {{#if @validations.required}}
-            {{icon "asterisk" class="form-template-field__required-indicator"}}
+            {{dIcon "asterisk" class="form-template-field__required-indicator"}}
           {{/if}}
         </label>
       {{/if}}
 
       {{#if @attributes.description}}
         <span class="form-template-field__description">
-          {{htmlSafe @attributes.description}}
+          {{trustHTML @attributes.description}}
         </span>
       {{/if}}
 
       <select
+        class="form-template-field__multi-select"
+        multiple={{@attributes.multiple}}
         name={{@id}}
         required={{if @validations.required "required" ""}}
-        multiple={{@attributes.multiple}}
-        class="form-template-field__multi-select"
         {{on "input" this.handleInput}}
       >
         {{#if @attributes.none_label}}
           <option
             class="form-template-field__multi-select-placeholder"
-            value=""
             disabled={{not this.selectedTags.length}}
             selected={{if this.selectedTags.length "" "selected"}}
+            value=""
           >{{@attributes.none_label}}</option>
         {{/if}}
         {{#each this.formattedChoices as |choice|}}
           <option
-            value={{choice.name}}
             selected={{this.isSelected choice.id}}
+            value={{choice.display}}
           >{{choice.display}}</option>
         {{/each}}
       </select>

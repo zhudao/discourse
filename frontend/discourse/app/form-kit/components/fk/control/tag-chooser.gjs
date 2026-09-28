@@ -1,9 +1,9 @@
-import Component from "@glimmer/component";
 import { hash } from "@ember/helper";
 import { action } from "@ember/object";
+import FKBaseControl from "discourse/form-kit/components/fk/control/base";
 import TagChooser from "discourse/select-kit/components/tag-chooser";
 
-export default class FKControlTagChooser extends Component {
+export default class FKControlTagChooser extends FKBaseControl {
   static controlType = "tag-chooser";
 
   @action
@@ -13,16 +13,23 @@ export default class FKControlTagChooser extends Component {
 
   <template>
     <TagChooser
-      @tags={{@field.value}}
-      @onChange={{this.handleChange}}
-      @everyTag={{@showAllTags}}
-      @excludeSynonyms={{@excludeSynonyms}}
-      @excludeHasSynonyms={{@excludeTagsWithSynonyms}}
-      @unlimitedTagCount={{@unlimited}}
-      @categoryId={{@categoryId}}
-      @allowCreate={{@allowCreate}}
-      @options={{hash disabled=@field.disabled filterPlaceholder=@placeholder}}
       class="form-kit__control-tag-chooser"
+      @allowCreate={{@allowCreate}}
+      @blockedTags={{@blockedTags}}
+      @categoryId={{@categoryId}}
+      @everyTag={{@showAllTags}}
+      @excludeHasSynonyms={{@excludeTagsWithSynonyms}}
+      @excludeSynonyms={{@excludeSynonyms}}
+      @onChange={{this.handleChange}}
+      @options={{hash
+        disabled=@field.disabled
+        filterPlaceholder=@placeholder
+        maximum=@maximum
+        mobilePlacement=@mobilePlacement
+        prioritizeRecentTags=@prioritizeRecentTags
+      }}
+      @tags={{@field.value}}
+      @unlimitedTagCount={{@unlimited}}
     />
   </template>
 }

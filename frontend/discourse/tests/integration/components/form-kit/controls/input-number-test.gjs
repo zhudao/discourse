@@ -15,9 +15,14 @@ module(
 
       await render(
         <template>
-          <Form @onSubmit={{mutateData}} @data={{data}} as |form|>
-            <form.Field @name="foo" @title="Foo" as |field|>
-              <field.Input @type="number" step="any" lang="en" />
+          <Form @data={{data}} @onSubmit={{mutateData}} as |form|>
+            <form.Field
+              @name="foo"
+              @title="Foo"
+              @type="input-number"
+              as |field|
+            >
+              <field.Control lang="en" step="any" />
             </form.Field>
           </Form>
         </template>
@@ -40,10 +45,15 @@ module(
 
       await render(
         <template>
-          <Form @onSubmit={{mutateData}} @data={{data}} as |form|>
-            <form.Field @name="foo" @title="Foo" as |field|>
+          <Form @data={{data}} @onSubmit={{mutateData}} as |form|>
+            <form.Field
+              @name="foo"
+              @title="Foo"
+              @type="input-number"
+              as |field|
+            >
 
-              <field.Input @type="number" />
+              <field.Control />
             </form.Field>
           </Form>
         </template>
@@ -65,10 +75,11 @@ module(
             <form.Field
               @name="foo"
               @title="Foo"
+              @type="input-number"
               @validation="required"
               as |field|
             >
-              <field.Input @type="number" />
+              <field.Control />
             </form.Field>
           </Form>
         </template>

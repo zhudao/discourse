@@ -1,11 +1,10 @@
 import { tracked } from "@glimmer/tracking";
 import Controller from "@ember/controller";
-import { action } from "@ember/object";
+import { action, computed } from "@ember/object";
 import { service } from "@ember/service";
 import { dasherize } from "@ember/string";
 import runAfterFramePaint from "discourse/lib/after-frame-paint";
 import discourseDebounce from "discourse/lib/debounce";
-import discourseComputed from "discourse/lib/decorators";
 import deprecated from "discourse/lib/deprecated";
 import EmbedMode from "discourse/lib/embed-mode";
 import { isTesting } from "discourse/lib/environment";
@@ -14,10 +13,10 @@ const HIDE_SIDEBAR_KEY = "sidebar-hidden";
 
 export default class ApplicationController extends Controller {
   @service footer;
-  // eslint-disable-next-line discourse/no-unused-services
-  @service router; // used in the route template
+  @service router;
   @service scrollState;
   @service sidebarState;
+  @service site;
   @service siteSettings;
 
   queryParams = [{ navigationMenuQueryParamOverride: "navigation_menu" }];
@@ -27,22 +26,6 @@ export default class ApplicationController extends Controller {
   navigationMenuQueryParamOverride = null;
   _showSiteHeader = true;
   @tracked _showSidebar;
-
-  get upcomingChangeBodyClasses() {
-    if (!this.siteSettings.currentUserUpcomingChanges) {
-      return "";
-    }
-
-    const classes = [];
-
-    Object.keys(this.siteSettings.currentUserUpcomingChanges).forEach((key) => {
-      if (this.siteSettings[key]) {
-        classes.push(`uc-${dasherize(key)}`);
-      }
-    });
-
-    return classes.join(" ");
-  }
 
   get showSiteHeader() {
     if (EmbedMode.enabled) {
@@ -77,6 +60,29 @@ export default class ApplicationController extends Controller {
     this.footer.showFooter = value;
   }
 
+  get isCurrentAdminRoute() {
+    return this.router.currentRouteName?.startsWith("admin");
+  }
+
+  get upcomingChangeBodyClasses() {
+    if (!this.siteSettings.currentUserUpcomingChanges) {
+      return "";
+    }
+
+    const classes = [];
+
+    Object.keys(this.siteSettings.currentUserUpcomingChanges).forEach((key) => {
+      if (
+        this.siteSettings[key] &&
+        this.site.upcoming_changes_with_css.includes(key)
+      ) {
+        classes.push(`uc-${dasherize(key)}`);
+      }
+    });
+
+    return classes.join(" ");
+  }
+
   get shouldHideScrollableContentAbove() {
     return this.scrollState.shouldHideContentAbove;
   }
@@ -89,32 +95,28 @@ export default class ApplicationController extends Controller {
     return this.showFooter && this.siteSettings.enable_powered_by_discourse;
   }
 
-  @discourseComputed
-  canSignUp() {
+  get canSignUp() {
     return (
+      !this.site.isReadOnly &&
       !this.siteSettings.invite_only &&
       this.siteSettings.allow_new_registrations &&
       !this.siteSettings.enable_discourse_connect
     );
   }
 
-  @discourseComputed
-  canDisplaySidebar() {
+  @computed
+  get canDisplaySidebar() {
     return this.currentUser || !this.siteSettings.login_required;
   }
 
-  @discourseComputed
-  loginRequired() {
+  @computed
+  get loginRequired() {
     return this.siteSettings.login_required && !this.currentUser;
   }
 
-  @discourseComputed
-  showFooterNav() {
+  @computed
+  get showFooterNav() {
     return this.capabilities.isAppWebview || this.capabilities.isiOSPWA;
-  }
-
-  _mainOutletAnimate() {
-    document.body.classList.remove("sidebar-animate");
   }
 
   get sidebarEnabled() {
@@ -199,5 +201,9 @@ export default class ApplicationController extends Controller {
         console.warn("Failed to measure init-to-paint", e);
       }
     });
+  }
+
+  _mainOutletAnimate() {
+    document.body.classList.remove("sidebar-animate");
   }
 }

@@ -4,16 +4,16 @@ import { tracked } from "@glimmer/tracking";
 import { fn } from "@ember/helper";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
-import { htmlSafe } from "@ember/template";
+import { trustHTML } from "@ember/template";
 import { isEmpty } from "@ember/utils";
 import AdminPenaltyPostAction from "discourse/admin/components/admin-penalty-post-action";
 import AdminPenaltyReason from "discourse/admin/components/admin-penalty-reason";
 import AdminPenaltySimilarUsers from "discourse/admin/components/admin-penalty-similar-users";
-import DButton from "discourse/components/d-button";
-import DModal from "discourse/components/d-modal";
-import FutureDateInput from "discourse/components/future-date-input";
 import { extractError } from "discourse/lib/ajax-error";
 import { eq } from "discourse/truth-helpers";
+import DButton from "discourse/ui-kit/d-button";
+import DFutureDateInput from "discourse/ui-kit/d-future-date-input";
+import DModal from "discourse/ui-kit/d-modal";
 import I18n, { i18n } from "discourse-i18n";
 
 export default class PenalizeUser extends Component {
@@ -21,23 +21,23 @@ export default class PenalizeUser extends Component {
   @service siteSettings;
 
   @tracked penalizeUntil = this.args.model.user.next_penalty;
+  @tracked penalizing = false;
   @tracked confirmClose = false;
+
   @tracked otherUserIds = [];
   @tracked postAction = "delete";
+  @tracked postEdit = this.args.model.postEdit; // eslint-disable-line discourse/no-unnecessary-tracked
   @tracked flash;
   @tracked reason;
   @tracked message;
   @tracked readyToDeleteAll = false;
+  #beforeCompleted = false;
 
   constructor() {
     super(...arguments);
     if (this.postEdit && this.siteSettings.penalty_include_post_message) {
       this.message = `-------------------\n${this.postEdit}\n-------------------`;
     }
-  }
-
-  get postEdit() {
-    return this.args.model.postEdit;
   }
 
   get modalTitle() {
@@ -90,12 +90,13 @@ export default class PenalizeUser extends Component {
     this.penalizing = true;
     this.confirmClose = true;
 
-    if (this.args.model.before) {
-      this.args.model.before();
-    }
-
     let result;
     try {
+      if (this.args.model.before && !this.#beforeCompleted) {
+        await this.args.model.before();
+        this.#beforeCompleted = true;
+      }
+
       const opts = {
         reason: this.reason,
         message: this.message,
@@ -103,6 +104,7 @@ export default class PenalizeUser extends Component {
         post_action: this.postAction,
         post_edit: this.postEdit,
         other_user_ids: this.otherUserIds,
+        reviewable_id: this.args.model.reviewableId,
       };
 
       if (this.args.model.penaltyType === "suspend") {
@@ -155,61 +157,61 @@ export default class PenalizeUser extends Component {
 
   <template>
     <DModal
-      class="{{@model.penaltyType}}-user-modal"
-      @title={{i18n this.modalTitle}}
+      class="{{@model.penaltyType}}-user-modal --large"
       @closeModal={{this.warnBeforeClosing}}
       @flash={{this.flash}}
+      @title={{i18n this.modalTitle}}
     >
       <:body>
         {{#if this.canPenalize}}
           <div class="penalty-duration-controls">
             {{#if (eq @model.penaltyType "suspend")}}
-              <FutureDateInput
-                @label="admin.user.suspend_duration"
+              <DFutureDateInput
+                class="suspend-until"
                 @clearable={{false}}
                 @input={{this.penalizeUntil}}
+                @label="admin.user.suspend_duration"
                 @onChangeInput={{fn (mut this.penalizeUntil)}}
-                class="suspend-until"
               />
             {{else if (eq @model.penaltyType "silence")}}
-              <FutureDateInput
-                @label="admin.user.silence_duration"
+              <DFutureDateInput
+                class="silence-until"
                 @clearable={{false}}
                 @input={{this.penalizeUntil}}
+                @label="admin.user.silence_duration"
                 @onChangeInput={{fn (mut this.penalizeUntil)}}
-                class="silence-until"
               />
             {{/if}}
           </div>
           {{#if (eq @model.penaltyType "suspend")}}
             <div class="penalty-reason-visibility">
               {{#if this.siteSettings.hide_suspension_reasons}}
-                {{htmlSafe (i18n "admin.user.suspend_reason_hidden_label")}}
+                {{trustHTML (i18n "admin.user.suspend_reason_hidden_label")}}
               {{else}}
-                {{htmlSafe (i18n "admin.user.suspend_reason_label")}}
+                {{trustHTML (i18n "admin.user.suspend_reason_label")}}
               {{/if}}
             </div>
           {{/if}}
           <AdminPenaltyReason
+            @message={{this.message}}
             @penaltyType={{@model.penaltyType}}
             @reason={{this.reason}}
-            @message={{this.message}}
           />
           {{#if @model.postId}}
             <AdminPenaltyPostAction
-              @postId={{@model.postId}}
+              @onDeleteAllPostsReady={{this.updateReadyToDeleteAll}}
               @postAction={{this.postAction}}
               @postEdit={{this.postEdit}}
+              @postId={{@model.postId}}
               @user={{@model.user}}
-              @onDeleteAllPostsReady={{this.updateReadyToDeleteAll}}
             />
           {{/if}}
           {{#if @model.user.similar_users_count}}
             <AdminPenaltySimilarUsers
-              @penaltyType={{@model.penaltyType}}
-              @user={{@model.user}}
-              @selectedUserIds={{this.otherUserIds}}
               @onUsersChanged={{this.similarUsersChanged}}
+              @penaltyType={{@model.penaltyType}}
+              @selectedUserIds={{this.otherUserIds}}
+              @user={{@model.user}}
             />
           {{/if}}
         {{else}}
@@ -219,9 +221,9 @@ export default class PenalizeUser extends Component {
             <div class="cant-silence">{{i18n "admin.user.cant_silence"}}</div>
           {{/if}}
         {{/if}}
+        <div class="penalty-history">{{trustHTML this.penaltyHistory}}</div>
       </:body>
       <:footer>
-        <div class="penalty-history">{{htmlSafe this.penaltyHistory}}</div>
         <DButton
           class="btn-danger perform-penalize"
           @action={{this.penalizeUser}}

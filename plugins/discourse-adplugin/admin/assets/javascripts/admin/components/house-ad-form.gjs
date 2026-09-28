@@ -37,10 +37,6 @@ export default class HouseAdForm extends Component {
     return i18n("admin.adplugin.house_ads.category_chooser_description");
   }
 
-  previewDisabled(data) {
-    return !data.html;
-  }
-
   get formData() {
     const model = this.args.model;
     return {
@@ -53,6 +49,10 @@ export default class HouseAdForm extends Component {
       group_ids: model.groups || [],
       routes: model.routes || [],
     };
+  }
+
+  previewDisabled(data) {
+    return !data.html;
   }
 
   @action
@@ -164,98 +164,105 @@ export default class HouseAdForm extends Component {
 
   <template>
     <Form
-      @onSubmit={{this.save}}
-      @data={{this.formData}}
       class="house-ad-form"
+      @data={{this.formData}}
+      @onSubmit={{this.save}}
       as |form data|
     >
       <form.Field
+        @format="large"
         @name="name"
         @title={{i18n "admin.adplugin.house_ads.name"}}
+        @type="input"
         @validation="required"
-        @format="large"
         as |field|
       >
-        <field.Input />
+        <field.Control />
       </form.Field>
 
       <form.Field
+        @format="full"
         @name="html"
         @title={{i18n "admin.adplugin.house_ads.html"}}
+        @type="code"
         @validation="required"
-        @format="full"
         as |field|
       >
-        <field.Code @lang="html" @height={{270}} />
+        <field.Control @height={{270}} @lang="html" />
       </form.Field>
 
       <form.Field
         @name="visible_to_logged_in_users"
         @title={{i18n "admin.adplugin.house_ads.show_to_logged_in_users"}}
+        @type="checkbox"
         as |field|
       >
-        <field.Checkbox />
+        <field.Control />
       </form.Field>
 
       <form.Field
         @name="visible_to_anons"
         @title={{i18n "admin.adplugin.house_ads.show_to_anons"}}
+        @type="checkbox"
         as |field|
       >
-        <field.Checkbox />
+        <field.Control />
       </form.Field>
 
       <form.Field
-        @name="categories"
-        @title={{i18n "admin.adplugin.house_ads.categories"}}
         @description={{this.categoryDescription}}
         @format="large"
+        @name="categories"
+        @title={{i18n "admin.adplugin.house_ads.categories"}}
+        @type="custom"
         as |field|
       >
-        <field.Custom>
+        <field.Control>
           <HouseAdsCategorySelector
             @categories={{this.site.categories}}
-            @selectedCategories={{field.value}}
             @onChange={{field.set}}
+            @selectedCategories={{field.value}}
           />
-        </field.Custom>
+        </field.Control>
       </form.Field>
 
       {{#if this.routesEnabled}}
         <form.Field
-          @name="routes"
-          @title={{i18n "admin.adplugin.house_ads.routes"}}
           @description={{i18n
             "admin.adplugin.house_ads.route_chooser_description"
           }}
           @format="large"
+          @name="routes"
+          @title={{i18n "admin.adplugin.house_ads.routes"}}
+          @type="custom"
           as |field|
         >
-          <field.Custom>
+          <field.Control>
             <HouseAdsRouteSelector
-              @value={{field.value}}
               @onChange={{field.set}}
+              @value={{field.value}}
             />
-          </field.Custom>
+          </field.Control>
         </form.Field>
       {{/if}}
 
       <form.Field
-        @name="group_ids"
-        @title={{i18n "admin.adplugin.house_ads.groups"}}
         @description={{i18n
           "admin.adplugin.house_ads.group_chooser_description"
         }}
         @format="large"
+        @name="group_ids"
+        @title={{i18n "admin.adplugin.house_ads.groups"}}
+        @type="custom"
         as |field|
       >
-        <field.Custom>
+        <field.Control>
           <GroupChooser
             @content={{this.site.groups}}
-            @value={{field.value}}
             @onChange={{field.set}}
+            @value={{field.value}}
           />
-        </field.Custom>
+        </field.Control>
       </form.Field>
 
       <form.Actions>
@@ -267,9 +274,9 @@ export default class HouseAdForm extends Component {
         />
         {{#unless this.isNew}}
           <form.Button
+            class="btn-danger"
             @action={{this.delete}}
             @label="admin.adplugin.house_ads.delete"
-            class="btn-danger"
           />
         {{/unless}}
       </form.Actions>

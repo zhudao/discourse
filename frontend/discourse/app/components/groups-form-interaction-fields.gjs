@@ -1,57 +1,19 @@
 /* eslint-disable ember/no-classic-components */
 import Component, { Input } from "@ember/component";
 import { fn, hash } from "@ember/helper";
-import { or } from "@ember/object/computed";
+import { computed } from "@ember/object";
 import { tagName } from "@ember-decorators/component";
 import PluginOutlet from "discourse/components/plugin-outlet";
-import TextField from "discourse/components/text-field";
 import DTooltip from "discourse/float-kit/components/d-tooltip";
 import lazyHash from "discourse/helpers/lazy-hash";
-import discourseComputed from "discourse/lib/decorators";
 import { NotificationLevels } from "discourse/lib/notification-levels";
 import ComboBox from "discourse/select-kit/components/combo-box";
 import NotificationsButton from "discourse/select-kit/components/notifications-button";
+import DTextField from "discourse/ui-kit/d-text-field";
 import { i18n } from "discourse-i18n";
 
 @tagName("")
 export default class GroupsFormInteractionFields extends Component {
-  @or(
-    "model.members_visibility_level",
-    "visibilityLevelOptions.firstObject.value"
-  )
-  membersVisibilityLevel;
-
-  @or("model.messageable_level", "aliasLevelOptions.firstObject.value")
-  messageableLevel;
-
-  @or("model.mentionable_level", "aliasLevelOptions.firstObject.value")
-  mentionableLevel;
-
-  visibilityLevelOptions = [
-    {
-      name: i18n("admin.groups.manage.interaction.visibility_levels.public"),
-      value: 0,
-    },
-    {
-      name: i18n(
-        "admin.groups.manage.interaction.visibility_levels.logged_on_users"
-      ),
-      value: 1,
-    },
-    {
-      name: i18n("admin.groups.manage.interaction.visibility_levels.members"),
-      value: 2,
-    },
-    {
-      name: i18n("admin.groups.manage.interaction.visibility_levels.staff"),
-      value: 3,
-    },
-    {
-      name: i18n("admin.groups.manage.interaction.visibility_levels.owners"),
-      value: 4,
-    },
-  ];
-
   aliasLevelOptions = [
     { name: i18n("groups.alias_levels.nobody"), value: 0 },
     { name: i18n("groups.alias_levels.only_admins"), value: 1 },
@@ -63,99 +25,57 @@ export default class GroupsFormInteractionFields extends Component {
 
   watchingNotificationLevel = NotificationLevels.WATCHING;
 
-  @discourseComputed(
-    "model.default_notification_level",
-    "watchingNotificationLevel"
-  )
-  defaultNotificationLevel(
-    defaultNotificationLevel,
-    watchingNotificationLevel
-  ) {
-    if (Object.values(NotificationLevels).includes(defaultNotificationLevel)) {
-      return defaultNotificationLevel;
+  @computed("model.messageable_level", "aliasLevelOptions.firstObject.value")
+  get messageableLevel() {
+    return (
+      this.model?.messageable_level ||
+      this.aliasLevelOptions?.firstObject?.value
+    );
+  }
+
+  @computed("model.mentionable_level", "aliasLevelOptions.firstObject.value")
+  get mentionableLevel() {
+    return (
+      this.model?.mentionable_level ||
+      this.aliasLevelOptions?.firstObject?.value
+    );
+  }
+
+  @computed("model.default_notification_level", "watchingNotificationLevel")
+  get defaultNotificationLevel() {
+    if (
+      Object.values(NotificationLevels).includes(
+        this.model?.default_notification_level
+      )
+    ) {
+      return this.model?.default_notification_level;
     }
-    return watchingNotificationLevel;
+    return this.watchingNotificationLevel;
   }
 
-  @discourseComputed(
-    "siteSettings.email_in",
-    "model.automatic",
-    "currentUser.admin"
-  )
-  showEmailSettings(emailIn, automatic, isAdmin) {
-    return emailIn && isAdmin && !automatic;
+  @computed("siteSettings.email_in", "model.automatic", "currentUser.admin")
+  get showEmailSettings() {
+    return (
+      this.siteSettings?.email_in &&
+      this.currentUser?.admin &&
+      !this.model?.automatic
+    );
   }
 
-  @discourseComputed(
+  @computed(
     "model.isCreated",
     "model.can_admin_group",
     "currentUser.can_create_group"
   )
-  canAdminGroup(isCreated, canAdmin, canCreate) {
-    return (!isCreated && canCreate) || (isCreated && canAdmin);
-  }
-
-  @discourseComputed("membersVisibilityLevel")
-  membersVisibilityPrivate(membersVisibilityLevel) {
+  get canAdminGroup() {
     return (
-      membersVisibilityLevel !== this.visibilityLevelOptions.firstObject.value
+      (!this.model?.isCreated && this.currentUser?.can_create_group) ||
+      (this.model?.isCreated && this.model?.can_admin_group)
     );
   }
 
   <template>
     <div ...attributes>
-      {{#if this.canAdminGroup}}
-        <div class="control-group">
-          <label class="control-label">
-            {{i18n "admin.groups.manage.interaction.visibility"}}
-          </label>
-          <label>
-            {{i18n "admin.groups.manage.interaction.visibility_levels.title"}}
-          </label>
-
-          <ComboBox
-            @name="alias"
-            @valueProperty="value"
-            @value={{this.model.visibility_level}}
-            @content={{this.visibilityLevelOptions}}
-            @onChange={{fn (mut this.model.visibility_level)}}
-            @options={{hash castInteger=true}}
-            class="groups-form-visibility-level"
-          />
-
-          <div class="control-instructions">
-            {{i18n
-              "admin.groups.manage.interaction.visibility_levels.description"
-            }}
-          </div>
-        </div>
-
-        <div class="control-group">
-          <label>
-            {{i18n
-              "admin.groups.manage.interaction.members_visibility_levels.title"
-            }}
-          </label>
-
-          <ComboBox
-            @name="alias"
-            @valueProperty="value"
-            @value={{this.membersVisibilityLevel}}
-            @content={{this.visibilityLevelOptions}}
-            @onChange={{fn (mut this.model.members_visibility_level)}}
-            class="groups-form-members-visibility-level"
-          />
-
-          {{#if this.membersVisibilityPrivate}}
-            <div class="control-instructions">
-              {{i18n
-                "admin.groups.manage.interaction.members_visibility_levels.description"
-              }}
-            </div>
-          {{/if}}
-        </div>
-      {{/if}}
-
       <div class="control-group">
         <label class="control-label">
           {{i18n "groups.manage.interaction.posting"}}
@@ -163,12 +83,12 @@ export default class GroupsFormInteractionFields extends Component {
         <label for="alias">{{i18n "groups.alias_levels.mentionable"}}</label>
 
         <ComboBox
-          @name="alias"
-          @valueProperty="value"
-          @value={{this.mentionableLevel}}
-          @content={{this.aliasLevelOptions}}
-          @onChange={{fn (mut this.model.mentionable_level)}}
           class="groups-form-mentionable-level"
+          @content={{this.aliasLevelOptions}}
+          @name="alias"
+          @onChange={{fn (mut this.model.mentionable_level)}}
+          @value={{this.mentionableLevel}}
+          @valueProperty="value"
         />
       </div>
 
@@ -176,12 +96,12 @@ export default class GroupsFormInteractionFields extends Component {
         <label for="alias">{{i18n "groups.alias_levels.messageable"}}</label>
 
         <ComboBox
-          @name="alias"
-          @valueProperty="value"
-          @value={{this.messageableLevel}}
-          @content={{this.aliasLevelOptions}}
-          @onChange={{fn (mut this.model.messageable_level)}}
           class="groups-form-messageable-level"
+          @content={{this.aliasLevelOptions}}
+          @name="alias"
+          @onChange={{fn (mut this.model.messageable_level)}}
+          @value={{this.messageableLevel}}
+          @valueProperty="value"
         />
       </div>
 
@@ -189,9 +109,9 @@ export default class GroupsFormInteractionFields extends Component {
         <div class="control-group">
           <label>
             <Input
-              @type="checkbox"
-              @checked={{this.model.publish_read_state}}
               class="groups-form-publish-read-state"
+              @checked={{this.model.publish_read_state}}
+              @type="checkbox"
             />
 
             {{i18n "admin.groups.manage.interaction.publish_read_state"}}
@@ -208,24 +128,24 @@ export default class GroupsFormInteractionFields extends Component {
             {{i18n "admin.groups.manage.interaction.incoming_email"}}
           </label>
 
-          <TextField
-            @name="incoming_email"
-            @value={{this.model.incoming_email}}
-            @placeholderKey="admin.groups.manage.interaction.incoming_email_placeholder"
+          <DTextField
             class="input-xxlarge groups-form-incoming-email"
+            @name="incoming_email"
+            @placeholderKey="admin.groups.manage.interaction.incoming_email_placeholder"
+            @value={{this.model.incoming_email}}
           />
 
           <DTooltip
-            @icon="circle-info"
             @content={{i18n
               "admin.groups.manage.interaction.incoming_email_tooltip"
             }}
+            @icon="circle-info"
           />
 
           <span>
             <PluginOutlet
-              @name="group-email-in"
               @connectorTagName="div"
+              @name="group-email-in"
               @outletArgs={{lazyHash model=this.model}}
             />
           </span>
@@ -240,17 +160,17 @@ export default class GroupsFormInteractionFields extends Component {
         <label>{{i18n "groups.notification_level"}}</label>
 
         <NotificationsButton
-          @value={{this.defaultNotificationLevel}}
-          @options={{hash i18nPrefix="groups.notifications"}}
-          @onChange={{fn (mut this.model.default_notification_level)}}
           class="groups-form-default-notification-level"
+          @onChange={{fn (mut this.model.default_notification_level)}}
+          @options={{hash i18nPrefix="groups.notifications"}}
+          @value={{this.defaultNotificationLevel}}
         />
       </div>
 
       <span>
         <PluginOutlet
-          @name="groups-interaction-custom-options"
           @connectorTagName="div"
+          @name="groups-interaction-custom-options"
           @outletArgs={{lazyHash model=this.model}}
         />
       </span>

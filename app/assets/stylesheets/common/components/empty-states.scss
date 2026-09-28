@@ -8,7 +8,8 @@
 
     &.--text-only {
       .empty-state__title {
-        font-weight: bold;
+        font-family: var(--heading-font-family);
+        font-weight: var(--heading-font-weight);
         font-size: var(--font-up-1);
       }
     }
@@ -61,14 +62,6 @@
 
     .d-icon {
       font-size: var(--font-down-1);
-    }
-
-    @include viewport.until(sm) {
-      position: absolute;
-      bottom: 3rem;
-      margin-inline: auto;
-      margin-top: 0;
-      left: 0;
     }
   }
 }

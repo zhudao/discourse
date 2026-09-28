@@ -23,22 +23,31 @@ module DiscourseAi
         prompt_cache.flush!
       end
 
+      def self.prompt_agent_ids
+        agents_prompt_map.keys.compact.uniq
+      end
+
       def initialize(helper_llm: nil, image_caption_llm: nil)
         @helper_llm = helper_llm
         @image_caption_llm = image_caption_llm
       end
 
       def available_prompts(user)
-        key = "prompt_cache_#{I18n.locale}"
-        prompts = self.class.prompt_cache.fetch(key) { self.all_prompts }
+        key =
+          if SiteSetting.granular_anonymous_and_logged_in_groups_permissions
+            "prompt_cache_#{I18n.locale}_everyone_disallowed"
+          else
+            "prompt_cache_#{I18n.locale}_everyone_allowed"
+          end
+        prompts = self.class.prompt_cache.fetch(key) { all_prompts }
 
         prompts
           .map do |prompt|
             next if !user.in_any_groups?(prompt[:allowed_group_ids])
 
             if prompt[:name] == ILLUSTRATE_POST
-              persona = AiPersona.find_by(id: SiteSetting.ai_helper_post_illustrator_persona)
-              next if persona.blank? || !persona_has_image_generation_tool?(persona)
+              agent = AiAgent.find_by(id: SiteSetting.ai_helper_post_illustrator_agent)
+              next if agent.blank? || !agent_has_image_generation_tool?(agent)
             end
 
             # We cannot cache this. It depends on the user's effective_locale.
@@ -64,6 +73,10 @@ module DiscourseAi
       def custom_locale_instructions(user = nil, force_default_locale)
         locale = SiteSetting.default_locale
         locale = user.effective_locale if !force_default_locale && user
+        locale_instructions(locale)
+      end
+
+      def locale_instructions(locale)
         locale_hash = LocaleSiteSetting.language_names[locale]
 
         if locale != "en" && locale_hash
@@ -116,7 +129,7 @@ module DiscourseAi
         end
 
         context =
-          DiscourseAi::Personas::BotContext.new(
+          DiscourseAi::Agents::BotContext.new(
             user: user,
             skip_show_thinking: true,
             feature_name: "ai_helper",
@@ -126,37 +139,25 @@ module DiscourseAi
           )
         context = attach_user_context(context, user, force_default_locale: force_default_locale)
 
-        bad_json = false
-        json_summary_schema_key = bot.persona.response_format&.first.to_h
+        json_summary_schema_key = bot.agent.response_format&.first.to_h
 
         schema_key = json_summary_schema_key["key"]&.to_sym
         schema_type = json_summary_schema_key["type"]
 
-        if schema_type == "array"
-          helper_response = []
-        else
-          helper_response = +""
-        end
+        structured_output = nil
+        helper_response = +""
 
         buffer_blk =
           Proc.new do |partial, _, type|
             if type == :structured_output && schema_type
-              helper_chunk = partial.read_buffered_property(schema_key)
-              next if helper_chunk.nil? || helper_chunk.empty?
+              structured_output = partial
 
-              if schema_type == "array"
-                if helper_chunk.is_a?(Array)
-                  helper_chunk.each do |item|
-                    helper_response << item if helper_response.exclude?(item)
-                  end
+              if schema_type == "string"
+                partial.read_buffered_property_chunk(schema_key) do |helper_chunk|
+                  helper_response << helper_chunk
+                  block.call(helper_chunk) if block
                 end
-              elsif schema_type == "string"
-                helper_response << helper_chunk
-              else
-                helper_response = helper_chunk
               end
-
-              block.call(helper_chunk) if block && !bad_json
             elsif type.blank?
               # Assume response is a regular completion.
               helper_response << partial
@@ -165,6 +166,16 @@ module DiscourseAi
           end
 
         bot.reply(context, &buffer_blk)
+
+        if schema_type && schema_type != "string"
+          # Non-string properties aren't streamed to callers; a single read at
+          # the end avoids transient placeholders the partial-JSON parser emits
+          # for incomplete elements (e.g. a trailing nil while an array is
+          # mid-stream).
+          helper_response = structured_output&.read_buffered_property(schema_key)
+          helper_response = helper_response.compact if helper_response.is_a?(Array)
+          helper_response = [] if schema_type == "array" && helper_response.nil?
+        end
 
         helper_response
       end
@@ -208,7 +219,6 @@ module DiscourseAi
         client_id: nil,
         custom_prompt: nil
       )
-        streamed_diff = +""
         streamed_result = +""
         start = Time.now
         type = prompt_type(helper_mode)
@@ -221,13 +231,12 @@ module DiscourseAi
           custom_prompt: custom_prompt,
         ) do |partial_response|
           streamed_result << partial_response
-          streamed_diff = parse_diff(input, partial_response) if type == :diff
 
-          # Throttle updates and check for safe stream points
+          # Throttle updates
           if (streamed_result.length > 10 && (Time.now - start > 0.3)) || Rails.env.test?
             sanitized = sanitize_result(streamed_result)
 
-            payload = { result: sanitized, diff: streamed_diff, done: false }
+            payload = { result: sanitized, done: false }
             publish_update(channel, payload, user, client_id: client_id)
             start = Time.now
           end
@@ -246,12 +255,19 @@ module DiscourseAi
         end
       end
 
-      def generate_image_caption(upload, user)
-        bot = build_bot(IMAGE_CAPTION, user)
+      def generate_image_caption(upload, user, locale: nil, post: nil, skip_access_check: false)
+        bot = build_bot(IMAGE_CAPTION, user, skip_access_check: skip_access_check)
         force_default_locale = false
+        custom_instructions =
+          if locale.present?
+            locale_instructions(locale)
+          else
+            custom_locale_instructions(user, force_default_locale)
+          end
 
         context =
-          DiscourseAi::Personas::BotContext.new(
+          DiscourseAi::Agents::BotContext.new(
+            post: post,
             user: user,
             skip_show_thinking: true,
             feature_name: IMAGE_CAPTION,
@@ -261,7 +277,7 @@ module DiscourseAi
                 content: ["Describe this image in a single sentence.", { upload_id: upload.id }],
               },
             ],
-            custom_instructions: custom_locale_instructions(user, force_default_locale),
+            custom_instructions: custom_instructions,
           )
 
         structured_output = nil
@@ -270,7 +286,7 @@ module DiscourseAi
           Proc.new do |partial, _, type|
             if type == :structured_output
               structured_output = partial
-              bot.persona.response_format&.first.to_h
+              bot.agent.response_format&.first.to_h
             end
           end
 
@@ -279,7 +295,7 @@ module DiscourseAi
         raw_caption = ""
 
         if structured_output
-          json_summary_schema_key = bot.persona.response_format&.first.to_h
+          json_summary_schema_key = bot.agent.response_format&.first.to_h
           raw_caption =
             structured_output.read_buffered_property(json_summary_schema_key["key"]&.to_sym)
         end
@@ -287,43 +303,69 @@ module DiscourseAi
         raw_caption.delete("|").squish.truncate_words(IMAGE_CAPTION_MAX_WORDS)
       end
 
+      def ensure_mode_access!(helper_mode, user)
+        ai_agent = ai_agent_for_mode(helper_mode)
+        return if ai_agent.nil?
+
+        raise Discourse::InvalidAccess if !user.in_any_groups?(ai_agent.allowed_group_ids.to_a)
+
+        ai_agent
+      end
+
+      def ensure_mode_access_for_location!(helper_mode, user, location)
+        ensure_mode_access!(helper_mode, user)
+        raise Discourse::InvalidAccess if !location_map(helper_mode).include?(location)
+      end
+
       private
 
-      def persona_has_image_generation_tool?(persona)
-        persona&.has_image_generation_tool?
+      def agent_has_image_generation_tool?(agent)
+        agent&.has_image_generation_tool?
       rescue StandardError => e
         Rails.logger.warn(
-          "Failed to check image generation tool for persona #{persona&.id}: #{e.message}",
+          "Failed to check image generation tool for agent #{agent&.id}: #{e.message}",
         )
         false
       end
 
-      def build_bot(helper_mode, user)
-        persona_id = personas_prompt_map(include_image_caption: true).invert[helper_mode]
-        raise Discourse::InvalidParameters.new(:mode) if persona_id.blank?
+      def ai_agent_for_mode(helper_mode)
+        agent_id = agents_prompt_map(include_image_caption: true).invert[helper_mode]
+        raise Discourse::InvalidParameters.new(:mode) if agent_id.blank?
 
-        persona_klass = AiPersona.find_by(id: persona_id)&.class_instance
-        return if persona_klass.nil?
-
-        llm_model = find_ai_helper_model(helper_mode, persona_klass)
-
-        DiscourseAi::Personas::Bot.as(user, persona: persona_klass.new, model: llm_model)
+        AiAgent.find_by(id: agent_id)
       end
 
-      def find_ai_helper_model(helper_mode, persona_klass)
+      def build_bot(helper_mode, user, skip_access_check: false)
+        ai_agent =
+          if skip_access_check
+            ai_agent_for_mode(helper_mode)
+          else
+            ensure_mode_access!(helper_mode, user)
+          end
+        return if ai_agent.nil?
+
+        agent_klass = ai_agent.class_instance
+        return if agent_klass.nil?
+
+        llm_model = find_ai_helper_model(helper_mode, agent_klass)
+
+        DiscourseAi::Agents::Bot.as(user, agent: agent_klass.new, model: llm_model)
+      end
+
+      def find_ai_helper_model(helper_mode, agent_klass)
         if helper_mode == IMAGE_CAPTION && @image_caption_llm.is_a?(LlmModel)
           return @image_caption_llm
         end
 
         return @helper_llm if helper_mode != IMAGE_CAPTION && @helper_llm.is_a?(LlmModel)
-        self.class.find_ai_helper_model(helper_mode, persona_klass)
+        self.class.find_ai_helper_model(helper_mode, agent_klass)
       end
 
       # Priorities are:
-      #   1. Persona's default LLM
+      #   1. Agent's default LLM
       #   2. SiteSetting.ai_default_llm_model (or newest LLM if not set)
-      def self.find_ai_helper_model(helper_mode, persona_klass)
-        model_id = persona_klass.default_llm_id || SiteSetting.ai_default_llm_model
+      def self.find_ai_helper_model(helper_mode, agent_klass)
+        model_id = agent_klass.default_llm_id || SiteSetting.ai_default_llm_model
 
         if model_id.present?
           LlmModel.find_by(id: model_id)
@@ -332,31 +374,35 @@ module DiscourseAi
         end
       end
 
-      def personas_prompt_map(include_image_caption: false)
+      def self.agents_prompt_map(include_image_caption: false)
         map = {
-          SiteSetting.ai_helper_translator_persona.to_i => TRANSLATE,
-          SiteSetting.ai_helper_title_suggestions_persona.to_i => GENERATE_TITLES,
-          SiteSetting.ai_helper_proofreader_persona.to_i => PROOFREAD,
-          SiteSetting.ai_helper_markdown_tables_persona.to_i => MARKDOWN_TABLE,
-          SiteSetting.ai_helper_custom_prompt_persona.to_i => CUSTOM_PROMPT,
-          SiteSetting.ai_helper_explain_persona.to_i => EXPLAIN,
-          SiteSetting.ai_helper_post_illustrator_persona.to_i => ILLUSTRATE_POST,
-          SiteSetting.ai_helper_smart_dates_persona.to_i => REPLACE_DATES,
+          SiteSetting.ai_helper_translator_agent.to_i => TRANSLATE,
+          SiteSetting.ai_helper_title_suggestions_agent.to_i => GENERATE_TITLES,
+          SiteSetting.ai_helper_proofreader_agent.to_i => PROOFREAD,
+          SiteSetting.ai_helper_markdown_tables_agent.to_i => MARKDOWN_TABLE,
+          SiteSetting.ai_helper_custom_prompt_agent.to_i => CUSTOM_PROMPT,
+          SiteSetting.ai_helper_explain_agent.to_i => EXPLAIN,
+          SiteSetting.ai_helper_post_illustrator_agent.to_i => ILLUSTRATE_POST,
+          SiteSetting.ai_helper_smart_dates_agent.to_i => REPLACE_DATES,
         }
 
         if include_image_caption
-          image_caption_persona = SiteSetting.ai_helper_image_caption_persona.to_i
-          map[image_caption_persona] = IMAGE_CAPTION if image_caption_persona
+          image_caption_agent = SiteSetting.ai_image_caption_agent.to_i
+          map[image_caption_agent] = IMAGE_CAPTION if image_caption_agent
         end
 
         map
       end
 
+      def agents_prompt_map(include_image_caption: false)
+        self.class.agents_prompt_map(include_image_caption:)
+      end
+
       def all_prompts
-        AiPersona
-          .where(id: personas_prompt_map.keys)
-          .map do |ai_persona|
-            prompt_name = personas_prompt_map[ai_persona.id]
+        AiAgent
+          .where(id: agents_prompt_map.keys)
+          .map do |ai_agent|
+            prompt_name = agents_prompt_map[ai_agent.id]
 
             if prompt_name
               {
@@ -367,7 +413,7 @@ module DiscourseAi
                 prompt_type: prompt_type(prompt_name),
                 icon: icon_map(prompt_name),
                 location: location_map(prompt_name),
-                allowed_group_ids: ai_persona.allowed_group_ids,
+                allowed_group_ids: ai_agent.allowed_group_ids,
               }
             end
           end
@@ -407,7 +453,7 @@ module DiscourseAi
         when TRANSLATE
           "language"
         when GENERATE_TITLES
-          "heading"
+          "discourse-h1"
         when PROOFREAD
           "spell-check"
         when MARKDOWN_TABLE

@@ -1,16 +1,16 @@
 /* eslint-disable ember/no-classic-components */
 import Component from "@ember/component";
+import { computed } from "@ember/object";
 import { isEmpty } from "@ember/utils";
 import { tagName } from "@ember-decorators/component";
-import discourseComputed from "discourse/lib/decorators";
 import { i18n } from "discourse-i18n";
 import ProductItem from "./product-item";
 
 @tagName("")
 export default class ProductList extends Component {
-  @discourseComputed("products")
-  emptyProducts(products) {
-    return isEmpty(products);
+  @computed("products")
+  get emptyProducts() {
+    return isEmpty(this.products);
   }
 
   <template>
@@ -19,7 +19,7 @@ export default class ProductList extends Component {
         <p>{{i18n "discourse_subscriptions.subscribe.no_products"}}</p>
       {{else}}
         {{#each this.products as |product|}}
-          <ProductItem @product={{product}} @isLoggedIn={{this.isLoggedIn}} />
+          <ProductItem @isLoggedIn={{this.isLoggedIn}} @product={{product}} />
         {{/each}}
       {{/if}}
     </div>

@@ -2,21 +2,24 @@ import { tracked } from "@glimmer/tracking";
 import { warn } from "@ember/debug";
 import { computed, get } from "@ember/object";
 import { dependentKeyCompat } from "@ember/object/compat";
+import { trackedObject } from "@ember/reactive/collections";
 import { service } from "@ember/service";
 import { compare } from "@ember/utils";
-import { TrackedObject } from "@ember-compat/tracked-built-ins";
 import { ajax } from "discourse/lib/ajax";
 import {
   addUniqueValueToArray,
   removeValueFromArray,
 } from "discourse/lib/array-tools";
 import { AUTO_GROUPS } from "discourse/lib/constants";
-import discourseComputed from "discourse/lib/decorators";
 import { getOwnerWithFallback } from "discourse/lib/get-owner";
 import getURL from "discourse/lib/get-url";
+import {
+  extraSavePropertiesFor,
+  registerModelSaveProperty,
+} from "discourse/lib/model-extensions";
 import { MultiCache } from "discourse/lib/multi-cache";
 import { NotificationLevels } from "discourse/lib/notification-levels";
-import { trackedArray } from "discourse/lib/tracked-tools";
+import { autoTrackedArray } from "discourse/lib/tracked-tools";
 import { applyValueTransformer } from "discourse/lib/transformer";
 import { removeAccents } from "discourse/lib/utilities";
 import PermissionType from "discourse/models/permission-type";
@@ -26,20 +29,20 @@ import Topic from "./topic";
 
 const CATEGORY_ASYNC_SEARCH_CACHE = {};
 const CATEGORY_ASYNC_HIERARCHICAL_SEARCH_CACHE = {};
-const pluginSaveProperties = new Set();
+const HTTP_NOT_FOUND = 404;
 
 let _uncategorized;
 
 /**
  * @internal
- * Adds a tracked property to the post model.
+ * Registers a property to include when saving a category.
  *
  * Intended to be used only in the plugin API.
  *
- * @param {string} propertyKey - The key of the property to track.
+ * @param {string} propertyKey - The key of the property to include.
  */
 export function _addCategoryPropertyForSave(propertyKey) {
-  pluginSaveProperties.add(propertyKey);
+  registerModelSaveProperty("category", propertyKey);
 }
 
 export default class Category extends RestModel {
@@ -138,14 +141,7 @@ export default class Category extends RestModel {
   }
 
   static findByIds(ids = []) {
-    const categories = [];
-    ids.forEach((id) => {
-      const found = Category.findById(id);
-      if (found) {
-        categories.push(found);
-      }
-    });
-    return categories;
+    return ids.map((id) => Category.findById(id)).filter(Boolean);
   }
 
   static hasAsyncFoundAll(ids) {
@@ -155,8 +151,9 @@ export default class Category extends RestModel {
 
   static async asyncFindByIds(ids = []) {
     ids = ids.map((x) => parseInt(x, 10));
+    const site = Site.current();
 
-    if (!Site.current().lazy_load_categories || this.hasAsyncFoundAll(ids)) {
+    if (!site.lazy_load_categories || this.hasAsyncFoundAll(ids)) {
       return this.findByIds(ids);
     }
 
@@ -170,16 +167,19 @@ export default class Category extends RestModel {
       );
     }
 
-    const categories = ids.map((id) =>
-      Site.current().updateCategory(result.get(id))
-    );
+    const loadedCategoryIds = site.loadedCategoryIds || new Set();
+    for (const id of ids) {
+      const category = result.get(id);
+      if (category) {
+        site.updateCategory(category);
+      } else {
+        site.removeCategory(id);
+      }
+      loadedCategoryIds.add(id);
+    }
+    site.set("loadedCategoryIds", loadedCategoryIds);
 
-    // Update loadedCategoryIds list
-    const loadedCategoryIds = Site.current().loadedCategoryIds || new Set();
-    ids.forEach((id) => loadedCategoryIds.add(id));
-    Site.current().set("loadedCategoryIds", loadedCategoryIds);
-
-    return categories;
+    return this.findByIds(ids);
   }
 
   static async asyncFindById(id) {
@@ -249,7 +249,7 @@ export default class Category extends RestModel {
     if (this.slugEncoded()) {
       parts = parts.map((urlPart) => decodeURI(urlPart));
     }
-    let category = null;
+    let category;
 
     if (parts.length > 0 && parts[parts.length - 1].match(/^\d+$/)) {
       const id = parseInt(parts.pop(), 10);
@@ -333,6 +333,7 @@ export default class Category extends RestModel {
   static _includePermissions(category, store, site) {
     const model = site.updateCategory(category);
     model.setupGroupsAndPermissions();
+    model.setupCategoryTypes();
     return model;
   }
 
@@ -486,26 +487,26 @@ export default class Category extends RestModel {
   @tracked minimum_required_tags;
   @tracked styleType = this.style_type;
   @tracked allowed_tags;
-  @trackedArray available_groups;
-  @trackedArray permissions;
-  @trackedArray required_tag_groups;
+  @tracked categoryTypes;
+  @autoTrackedArray available_groups;
+  @autoTrackedArray permissions;
+  @autoTrackedArray required_tag_groups;
 
   init() {
     super.init(...arguments);
     this.setupGroupsAndPermissions();
+    this.setupCategoryTypes();
   }
 
-  setupGroupsAndPermissions() {
-    if (!this.available_groups) {
-      return;
+  @computed("parent_category_id", "site.categories.[]")
+  get parentCategory() {
+    if (this.parent_category_id) {
+      return Category.findById(this.parent_category_id);
     }
+  }
 
-    if (this.group_permissions) {
-      this.permissions = this.group_permissions.map((elem) => {
-        removeValueFromArray(this.available_groups, elem.group_name);
-        return new TrackedObject(elem);
-      });
-    }
+  set parentCategory(newParentCategory) {
+    this.set("parent_category_id", newParentCategory?.id);
   }
 
   @dependentKeyCompat
@@ -539,19 +540,12 @@ export default class Category extends RestModel {
     );
   }
 
-  @computed("parent_category_id", "site.categories.[]")
-  get parentCategory() {
-    if (this.parent_category_id) {
-      return Category.findById(this.parent_category_id);
-    }
-  }
-
-  set parentCategory(newParentCategory) {
-    this.set("parent_category_id", newParentCategory?.id);
-  }
-
   get subcategories() {
-    return this.site.categoriesByParentId.get(this.id) || [];
+    return applyValueTransformer(
+      "category-subcategories",
+      this.site.categoriesByParentId.get(this.id) || [],
+      { category: this }
+    );
   }
 
   get unloadedSubcategoryCount() {
@@ -583,8 +577,8 @@ export default class Category extends RestModel {
     }
   }
 
-  @discourseComputed
-  availablePermissions() {
+  @computed
+  get availablePermissions() {
     return [
       PermissionType.create({ id: PermissionType.FULL }),
       PermissionType.create({ id: PermissionType.CREATE_POST }),
@@ -592,25 +586,28 @@ export default class Category extends RestModel {
     ];
   }
 
-  @discourseComputed("id")
-  searchContext(id) {
+  @computed("id")
+  get searchContext() {
     return {
       type: "category",
-      id,
+      id: this.id,
       /** @type Category */
       category: this,
     };
   }
 
-  @discourseComputed("parentCategory.ancestors")
-  ancestors(parentAncestors) {
-    return [...(parentAncestors || []), this];
+  @computed("parentCategory.ancestors")
+  get ancestors() {
+    return [...(this.parentCategory?.ancestors || []), this];
   }
 
-  @discourseComputed("parentCategory", "parentCategory.predecessors")
-  predecessors(parentCategory, parentPredecessors) {
-    if (parentCategory) {
-      return [parentCategory, ...parentPredecessors];
+  @computed("parentCategory", "parentCategory.predecessors")
+  get predecessors() {
+    if (this.parentCategory) {
+      return [
+        this.parentCategory,
+        ...(this.parentCategory?.predecessors || []),
+      ];
     } else {
       return [];
     }
@@ -626,134 +623,139 @@ export default class Category extends RestModel {
     return descendants;
   }
 
-  @discourseComputed("parentCategory.level")
-  level(parentLevel) {
-    if (!parentLevel) {
-      return parentLevel === 0 ? 1 : 0;
+  @computed("parentCategory.level")
+  get level() {
+    if (!this.parentCategory?.level) {
+      return this.parentCategory?.level === 0 ? 1 : 0;
     } else {
-      return parentLevel + 1;
+      return this.parentCategory?.level + 1;
     }
   }
 
-  @discourseComputed("has_children", "subcategories")
-  isParent(hasChildren, subcategories) {
-    return hasChildren || (subcategories && subcategories.length > 0);
+  @computed("has_children", "subcategories")
+  get isParent() {
+    return (
+      this.has_children || (this.subcategories && this.subcategories.length > 0)
+    );
   }
 
-  @discourseComputed("subcategories")
-  isGrandParent(subcategories) {
+  @computed("subcategories")
+  get isGrandParent() {
     return (
-      subcategories &&
-      subcategories.some(
+      this.subcategories &&
+      this.subcategories.some(
         (cat) => cat.subcategories && cat.subcategories.length > 0
       )
     );
   }
 
-  @discourseComputed("notification_level")
-  isMuted(notificationLevel) {
-    return notificationLevel === NotificationLevels.MUTED;
+  @computed("notification_level")
+  get isMuted() {
+    return this.notification_level === NotificationLevels.MUTED;
   }
 
-  @discourseComputed("isMuted", "subcategories")
-  isHidden(isMuted, subcategories) {
-    if (!isMuted) {
+  @computed("isMuted", "subcategories")
+  get isHidden() {
+    if (!this.isMuted) {
       return false;
-    } else if (!subcategories) {
+    } else if (!this.subcategories) {
       return true;
     }
 
-    if (subcategories.some((cat) => !cat.isHidden)) {
+    if (this.subcategories.some((cat) => !cat.isHidden)) {
       return false;
     }
 
     return true;
   }
 
-  @discourseComputed("isMuted", "subcategories")
-  hasMuted(isMuted, subcategories) {
-    if (isMuted) {
+  @computed("isMuted", "subcategories")
+  get hasMuted() {
+    if (this.isMuted) {
       return true;
-    } else if (!subcategories) {
+    } else if (!this.subcategories) {
       return false;
     }
 
-    if (subcategories.some((cat) => cat.hasMuted)) {
+    if (this.subcategories.some((cat) => cat.hasMuted)) {
       return true;
     }
 
     return false;
   }
 
-  @discourseComputed("notification_level")
-  notificationLevelString(notificationLevel) {
+  @computed("notification_level")
+  get notificationLevelString() {
     // Get the key from the value
     const notificationLevelString = Object.keys(NotificationLevels).find(
-      (key) => NotificationLevels[key] === notificationLevel
+      (key) => NotificationLevels[key] === this.notification_level
     );
     if (notificationLevelString) {
       return notificationLevelString.toLowerCase();
     }
   }
 
-  @discourseComputed("name")
-  path() {
+  @computed("name")
+  get path() {
     return `/c/${Category.slugFor(this)}/${this.id}`;
   }
 
-  @discourseComputed("path")
-  url(path) {
-    return getURL(path);
+  @computed("path")
+  get url() {
+    return getURL(this.path);
   }
 
-  @discourseComputed
-  fullSlug() {
+  @computed
+  get fullSlug() {
     return Category.slugFor(this).replace(/\//g, "-");
   }
 
-  @discourseComputed("name")
-  nameLower(name) {
-    return name.toLowerCase();
+  @computed("name")
+  get nameLower() {
+    return this.name.toLowerCase();
   }
 
-  @discourseComputed("url")
-  unreadUrl(url) {
-    return `${url}/l/unread`;
+  @computed("url")
+  get unreadUrl() {
+    return `${this.url}/l/unread`;
   }
 
-  @discourseComputed("url")
-  newUrl(url) {
-    return `${url}/l/new`;
+  @computed("url")
+  get newUrl() {
+    return `${this.url}/l/new`;
   }
 
-  @discourseComputed("color", "text_color")
-  style(color, textColor) {
-    return `background-color: #${color}; color: #${textColor}`;
+  @computed("color", "text_color")
+  get style() {
+    return `background-color: #${this.color}; color: #${this.text_color}`;
   }
 
-  @discourseComputed("topic_count")
-  moreTopics(topicCount) {
-    return topicCount > (this.num_featured_topics || 2);
+  @computed("topic_count")
+  get moreTopics() {
+    return this.topic_count > (this.num_featured_topics || 2);
   }
 
-  @discourseComputed("topic_count", "subcategories.[]")
-  totalTopicCount(topicCount, subcategories) {
-    if (subcategories) {
-      subcategories.forEach((subcategory) => {
+  @computed("topic_count", "subcategories.[]")
+  get totalTopicCount() {
+    let topicCount = this.topic_count;
+    if (this.subcategories) {
+      this.subcategories.forEach((subcategory) => {
         topicCount += subcategory.topic_count;
       });
     }
     return topicCount;
   }
 
-  @discourseComputed("default_slow_mode_seconds")
-  defaultSlowModeMinutes(seconds) {
-    return seconds ? seconds / 60 : null;
+  @computed("default_slow_mode_seconds")
+  get defaultSlowModeMinutes() {
+    return this.default_slow_mode_seconds
+      ? this.default_slow_mode_seconds / 60
+      : null;
   }
 
-  @discourseComputed("notification_level")
-  isTracked(notificationLevel) {
-    return notificationLevel >= NotificationLevels.TRACKING;
+  @computed("notification_level")
+  get isTracked() {
+    return this.notification_level >= NotificationLevels.TRACKING;
   }
 
   get unreadTopicsCount() {
@@ -762,6 +764,52 @@ export default class Category extends RestModel {
 
   get newTopicsCount() {
     return this.topicTrackingState.countNew({ categoryId: this.id });
+  }
+
+  @computed("topics")
+  get latestTopic() {
+    if (this.topics && this.topics.length) {
+      return this.topics[0];
+    }
+  }
+
+  @computed("topics")
+  get featuredTopics() {
+    if (this.topics && this.topics.length) {
+      return this.topics.slice(0, this.num_featured_topics || 2);
+    }
+  }
+
+  @computed("id")
+  get isUncategorizedCategory() {
+    return Category.isUncategorized(this.id);
+  }
+
+  get canCreateTopic() {
+    return this.permission === PermissionType.FULL;
+  }
+
+  get subcategoryWithCreateTopicPermission() {
+    return this.subcategories?.find(
+      (subcategory) => subcategory.canCreateTopic
+    );
+  }
+
+  setupCategoryTypes() {
+    this.categoryTypes = trackedObject(this.category_types);
+  }
+
+  setupGroupsAndPermissions() {
+    if (!this.available_groups) {
+      return;
+    }
+
+    if (this.group_permissions) {
+      this.permissions = this.group_permissions.map((elem) => {
+        removeValueFromArray(this.available_groups, elem.group_name);
+        return trackedObject(elem);
+      });
+    }
   }
 
   save() {
@@ -777,7 +825,6 @@ export default class Category extends RestModel {
         slug: this.slug,
         color: this.color,
         text_color: this.text_color,
-        secure: this.secure,
         permissions: this._permissionsForUpdate(),
         auto_close_hours: this.auto_close_hours,
         auto_close_based_on_last_post: this.get(
@@ -797,6 +844,7 @@ export default class Category extends RestModel {
         category_setting_attributes: this.category_setting,
         custom_fields: this.custom_fields,
         topic_template: this.topic_template,
+        topic_title_placeholder: this.topic_title_placeholder,
         form_template_ids: this.form_template_ids,
         all_topics_wiki: this.all_topics_wiki,
         allow_unlimited_owner_edits_on_first_post:
@@ -821,38 +869,23 @@ export default class Category extends RestModel {
         ),
         search_priority: this.search_priority,
         moderating_group_ids: this.moderating_group_ids,
+        topic_posting_review_group_ids: this.topic_posting_review_group_ids,
+        reply_posting_review_group_ids: this.reply_posting_review_group_ids,
         read_only_banner: this.read_only_banner,
         default_list_filter: this.default_list_filter,
         style_type: this.style_type,
         emoji: this.emoji,
         icon: this.icon,
         ...(this.siteSettings.content_localization_enabled && {
+          locale: this.locale,
           category_localizations: this.localizations,
         }),
+        ...this._categoryTypeSaveProperties(id),
         ...this._pluginSaveProperties(),
+        category_types: this.category_types,
       }),
       type: id ? "PUT" : "POST",
     });
-  }
-
-  _pluginSaveProperties() {
-    return Array.from(pluginSaveProperties).reduce((obj, key) => {
-      obj[key] = this[key];
-      return obj;
-    }, {});
-  }
-
-  _permissionsForUpdate() {
-    const permissions = this.permissions;
-    let rval = {};
-    if (permissions.length) {
-      permissions.forEach((p) => (rval[p.group_name] = p.permission_type));
-    } else {
-      // empty permissions => staff-only access
-      rval[Site.currentProp("groupsById")[AUTO_GROUPS.staff.id].name] =
-        PermissionType.FULL;
-    }
-    return rval;
   }
 
   destroy() {
@@ -862,7 +895,7 @@ export default class Category extends RestModel {
   }
 
   addPermission(permission) {
-    addUniqueValueToArray(this.permissions, new TrackedObject(permission));
+    addUniqueValueToArray(this.permissions, trackedObject(permission));
     removeValueFromArray(this.available_groups, permission.group_name);
   }
 
@@ -885,18 +918,16 @@ export default class Category extends RestModel {
     });
   }
 
-  @discourseComputed("topics")
-  latestTopic(topics) {
-    if (topics && topics.length) {
-      return topics[0];
-    }
+  isType(type) {
+    return Object.keys(this.categoryTypes ?? {}).includes(type);
   }
 
-  @discourseComputed("topics")
-  featuredTopics(topics) {
-    if (topics && topics.length) {
-      return topics.slice(0, this.num_featured_topics || 2);
-    }
+  getType(type) {
+    return this.categoryTypes?.[type];
+  }
+
+  removeType(type) {
+    delete this.categoryTypes[type];
   }
 
   setNotification(notification_level) {
@@ -922,28 +953,51 @@ export default class Category extends RestModel {
     );
   }
 
-  @discourseComputed("id")
-  isUncategorizedCategory(id) {
-    return Category.isUncategorized(id);
+  _categoryTypeSaveProperties(id) {
+    const props = {
+      category_type_site_settings: this.category_type_site_settings,
+      category_type_settings: this.category_type_settings,
+    };
+
+    if (!id && this.categoryTypes) {
+      const primaryType = Object.keys(this.categoryTypes)[0];
+      if (this.category_types?.includes(primaryType)) {
+        props.category_type = primaryType;
+      }
+    }
+
+    return props;
   }
 
-  get canCreateTopic() {
-    return this.permission === PermissionType.FULL;
+  _pluginSaveProperties() {
+    return extraSavePropertiesFor("category", this);
   }
 
-  get subcategoryWithCreateTopicPermission() {
-    return this.subcategories?.find(
-      (subcategory) => subcategory.canCreateTopic
-    );
+  _permissionsForUpdate() {
+    const permissions = this.permissions;
+    let rval = {};
+    if (permissions.length) {
+      permissions.forEach((p) => (rval[p.group_name] = p.permission_type));
+    } else {
+      // empty permissions => staff-only access
+      rval[Site.currentProp("groupsById")[AUTO_GROUPS.staff.id].name] =
+        PermissionType.FULL;
+    }
+    return rval;
   }
 }
 
 const categoryMultiCache = new MultiCache(async (ids) => {
-  const result = await ajax("/categories/find", { data: { ids } });
+  try {
+    const { categories } = await ajax("/categories/find", { data: { ids } });
+    return new Map(categories.map((category) => [category.id, category]));
+  } catch (error) {
+    if (error.jqXHR?.status === HTTP_NOT_FOUND) {
+      return new Map();
+    }
 
-  return new Map(
-    result["categories"].map((category) => [category.id, category])
-  );
+    throw error;
+  }
 });
 
 export function resetCategoryCache() {

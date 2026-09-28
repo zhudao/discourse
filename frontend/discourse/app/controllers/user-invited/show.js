@@ -1,16 +1,16 @@
 /* eslint-disable ember/no-observers */
 import { tracked } from "@glimmer/tracking";
 import Controller from "@ember/controller";
-import { action } from "@ember/object";
-import { equal, reads } from "@ember/object/computed";
+import { action, computed } from "@ember/object";
+import { dependentKeyCompat } from "@ember/object/compat";
 import { service } from "@ember/service";
 import { observes } from "@ember-decorators/object";
-import CreateInvite from "discourse/components/modal/create-invite";
 import CreateInviteBulk from "discourse/components/modal/create-invite-bulk";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import { removeValueFromArray } from "discourse/lib/array-tools";
-import discourseComputed, { debounce } from "discourse/lib/decorators";
+import { debounce } from "discourse/lib/decorators";
 import { INPUT_DELAY } from "discourse/lib/environment";
+import { showCreateInviteModal } from "discourse/lib/invite-modal";
 import Invite from "discourse/models/invite";
 import { i18n } from "discourse-i18n";
 
@@ -24,23 +24,82 @@ export default class UserInvitedShowController extends Controller {
   @tracked canLoadMore = true;
   @tracked hasLoadedInitialInvites = false;
   @tracked invitesLoading = false;
+  @tracked filter = null;
 
   user = null;
   model = null;
-  filter = null;
   invitesCount = null;
 
   reinvitedAll = false;
   searchTerm = "";
 
-  @equal("filter", "redeemed") inviteRedeemed;
-  @equal("filter", "expired") inviteExpired;
-  @equal("filter", "pending") invitePending;
-  @reads("currentUser.can_invite_to_forum") canInviteToForum;
+  @tracked _canInviteToForumOverride;
 
-  @discourseComputed("currentUser.admin", "siteSettings.allow_bulk_invite")
-  canBulkInvite(isAdmin, allowBulkInvite) {
-    return isAdmin && allowBulkInvite;
+  @computed("currentUser.can_invite_to_forum", "user.profile_hidden")
+  get canInviteToForum() {
+    if (this._canInviteToForumOverride !== undefined) {
+      return this._canInviteToForumOverride;
+    }
+    return this.currentUser?.can_invite_to_forum && !this.user?.profile_hidden;
+  }
+
+  set canInviteToForum(value) {
+    this._canInviteToForumOverride = value;
+  }
+
+  @dependentKeyCompat
+  get inviteRedeemed() {
+    return this.filter === "redeemed";
+  }
+
+  @dependentKeyCompat
+  get inviteExpired() {
+    return this.filter === "expired";
+  }
+
+  @dependentKeyCompat
+  get invitePending() {
+    return this.filter === "pending";
+  }
+
+  @computed("user.id", "currentUser.id")
+  get viewingSelf() {
+    return this.user?.id === this.currentUser?.id;
+  }
+
+  @computed("canInviteToForum", "viewingSelf")
+  get canCreateInvite() {
+    return this.canInviteToForum && this.viewingSelf;
+  }
+
+  @computed(
+    "currentUser.admin",
+    "siteSettings.allow_bulk_invite",
+    "viewingSelf"
+  )
+  get canBulkInvite() {
+    return (
+      this.currentUser?.admin &&
+      this.siteSettings?.allow_bulk_invite &&
+      this.viewingSelf
+    );
+  }
+
+  @computed("model")
+  get hasEmailInvites() {
+    return this.model.invites.some((invite) => {
+      return invite.email;
+    });
+  }
+
+  @computed("model")
+  get showBulkActionButtons() {
+    return this.model.invites.length > 0 && this.currentUser.staff;
+  }
+
+  @computed("invitesCount", "filter")
+  get showSearch() {
+    return this.invitesCount[this.filter] > 5;
   }
 
   @observes("searchTerm")
@@ -48,33 +107,9 @@ export default class UserInvitedShowController extends Controller {
     this._searchTermChanged();
   }
 
-  @debounce(INPUT_DELAY)
-  _searchTermChanged() {
-    Invite.findInvitedBy(this.user, this.filter, this.searchTerm).then(
-      (invites) => this.set("model", invites)
-    );
-  }
-
-  @discourseComputed("model")
-  hasEmailInvites(model) {
-    return model.invites.some((invite) => {
-      return invite.email;
-    });
-  }
-
-  @discourseComputed("model")
-  showBulkActionButtons(model) {
-    return model.invites.length > 0 && this.currentUser.staff;
-  }
-
-  @discourseComputed("invitesCount", "filter")
-  showSearch(invitesCount, filter) {
-    return invitesCount[filter] > 5;
-  }
-
   @action
   createInvite() {
-    this.modal.show(CreateInvite, { model: { invites: this.model.invites } });
+    showCreateInviteModal(this, { model: { invites: this.model.invites } });
   }
 
   @action
@@ -84,7 +119,7 @@ export default class UserInvitedShowController extends Controller {
 
   @action
   editInvite(invite) {
-    this.modal.show(CreateInvite, { model: { editing: true, invite } });
+    showCreateInviteModal(this, { model: { editing: true, invite } });
   }
 
   @action
@@ -140,12 +175,13 @@ export default class UserInvitedShowController extends Controller {
       this.invitesLoading = true;
 
       try {
-        const inviteList = await Invite.findInvitedBy(
+        const result = await Invite.findInvitedBy(
           this.user,
           this.filter,
           this.searchTerm,
           model.invites.length
-        ).invites;
+        );
+        const inviteList = result.invites;
 
         this.invitesLoading = false;
         model.invites.push(...inviteList);
@@ -160,5 +196,12 @@ export default class UserInvitedShowController extends Controller {
         this.hasLoadedInitialInvites = true;
       }
     }
+  }
+
+  @debounce(INPUT_DELAY)
+  _searchTermChanged() {
+    Invite.findInvitedBy(this.user, this.filter, this.searchTerm).then(
+      (invites) => this.set("model", invites)
+    );
   }
 }

@@ -1,15 +1,19 @@
 /* eslint-disable ember/no-classic-components */
 import Component from "@ember/component";
-import { htmlSafe } from "@ember/template";
+import { service } from "@ember/service";
+import { trustHTML } from "@ember/template";
 import { tagName } from "@ember-decorators/component";
 import CategoryTitleLink from "discourse/components/category-title-link";
 import ParentCategoryRow from "discourse/components/parent-category-row";
 import PluginOutlet from "discourse/components/plugin-outlet";
+import categoryListSubcategories from "discourse/helpers/category-list-subcategories";
 import lazyHash from "discourse/helpers/lazy-hash";
 import { i18n } from "discourse-i18n";
 
 @tagName("")
 export default class SubcategoriesWithFeaturedTopics extends Component {
+  @service discovery;
+
   <template>
     <div ...attributes>
       {{#each this.categories as |category|}}
@@ -21,12 +25,19 @@ export default class SubcategoriesWithFeaturedTopics extends Component {
             <div class="category-list subcategory-list with-topics">
               <div class="parent-category">
                 <CategoryTitleLink @category={{category}} />
-                <span class="stat" title={{category.statTitle}}>{{htmlSafe
+                <span class="stat" title={{category.statTitle}}>{{trustHTML
                     category.stat
                   }}</span>
               </div>
               <div class="subcategories">
-                {{#each category.serializedSubcategories as |subCategory|}}
+                {{#each
+                  (categoryListSubcategories
+                    category
+                    page=this.discovery.categoryListPage
+                    subcategories=category.serializedSubcategories
+                  )
+                  as |subCategory|
+                }}
                   <ParentCategoryRow
                     @category={{subCategory}}
                     @showTopics={{true}}
@@ -51,7 +62,7 @@ export default class SubcategoriesWithFeaturedTopics extends Component {
                 <tr>
                   <th class="parent-category">
                     <CategoryTitleLink @category={{category}} />
-                    <span class="stat" title={{category.statTitle}}>{{htmlSafe
+                    <span class="stat" title={{category.statTitle}}>{{trustHTML
                         category.stat
                       }}</span>
                   </th>
@@ -60,7 +71,14 @@ export default class SubcategoriesWithFeaturedTopics extends Component {
                 </tr>
               </thead>
               <tbody aria-labelledby="categories-only-category">
-                {{#each category.serializedSubcategories as |subCategory|}}
+                {{#each
+                  (categoryListSubcategories
+                    category
+                    page=this.discovery.categoryListPage
+                    subcategories=category.serializedSubcategories
+                  )
+                  as |subCategory|
+                }}
                   <ParentCategoryRow
                     @category={{subCategory}}
                     @showTopics={{true}}

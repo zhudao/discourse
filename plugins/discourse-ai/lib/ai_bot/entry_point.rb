@@ -6,9 +6,9 @@ module DiscourseAi
       Bot = Struct.new(:id, :name, :llm)
 
       def self.all_bot_ids
-        AiPersona
-          .persona_users
-          .map { |persona| persona[:user_id] }
+        AiAgent
+          .agent_users
+          .map { |agent| agent[:user_id] }
           .concat(LlmModel.where(id: LlmModel.enabled_chat_bot_ids).pluck(:user_id).compact)
       end
 
@@ -42,6 +42,36 @@ module DiscourseAi
         SQL
       end
 
+      # Anonymous users can't converse with a bot. Adding them to
+      # `ai_bot_allowed_groups` only lets them preview the conversations page.
+      def self.anonymous_preview_allowed?
+        SiteSetting.ai_bot_enabled &&
+          SiteSetting.ai_bot_allowed_groups_map.include?(Group::AUTO_GROUPS[:anonymous_users])
+      end
+
+      def self.personal_message_bot_user_ids(user)
+        return [] if user.blank? || !SiteSetting.ai_bot_enabled
+
+        bot_user_ids = []
+
+        if user.in_any_groups?(SiteSetting.ai_bot_allowed_groups_map)
+          bot_user_ids.concat(
+            LlmModel
+              .where(id: LlmModel.enabled_chat_bot_ids)
+              .where.not(user_id: nil)
+              .pluck(:user_id),
+          )
+        end
+
+        bot_user_ids.concat(
+          AiAgent
+            .allowed_modalities(user: user, allow_personal_messages: true)
+            .map { |agent| agent[:user_id] },
+        )
+
+        bot_user_ids.compact
+      end
+
       # Most errors are simply "not_allowed"
       # we do not want to reveal information about this system
       # the 2 exceptions are "other_people_in_pm" and "other_content_in_pm"
@@ -70,6 +100,65 @@ module DiscourseAi
         TopicView.default_post_custom_fields << POST_AI_LLM_NAME_FIELD
 
         plugin.register_topic_custom_field_type(TOPIC_AI_BOT_PM_FIELD, :string)
+
+        plugin.register_homepage(
+          "ai-conversations",
+          name: "discourse_ai.ai_bot.conversations.homepage_option",
+          path: "/discourse-ai/ai-bot/conversations",
+          route: "discourse_ai/ai_bot/conversations#index",
+          anonymous: true,
+          enabled: -> { SiteSetting.ai_bot_enabled },
+          available: ->(guardian:, request:) do
+            if guardian.anonymous?
+              DiscourseAi::AiBot::EntryPoint.anonymous_preview_allowed? &&
+                !CrawlerDetection.crawler_layout_request?(request)
+            else
+              DiscourseAi::AiBot::EntryPoint.personal_message_bot_user_ids(guardian.user).present?
+            end
+          end,
+        )
+
+        plugin.add_to_serializer(
+          :site,
+          :ai_bot_anonymous_preview,
+          include_condition: -> do
+            scope.anonymous? && DiscourseAi::AiBot::EntryPoint.anonymous_preview_allowed?
+          end,
+        ) { true }
+
+        not_bot_pm_sql = <<~SQL
+          NOT EXISTS (
+            SELECT 1 FROM topic_custom_fields tcf_pm_inbox
+            WHERE tcf_pm_inbox.topic_id = topics.id
+            AND tcf_pm_inbox.name = '#{TOPIC_AI_BOT_PM_FIELD}'
+            AND tcf_pm_inbox.value = 't'
+          )
+        SQL
+
+        # Hide bot PMs from the personal inbox queries (Latest, New, Unread)
+        # so human conversations are not buried under bot replies. Sent and
+        # Archive are intentionally untouched.
+        plugin.register_modifier(:private_messages_personal_inbox_query) do |list, _user|
+          next list unless SiteSetting.ai_bot_enabled
+
+          list.where(not_bot_pm_sql)
+        end
+
+        # Keep bot PMs out of the inbox unread/new counts too, since the
+        # lists above no longer show them.
+        plugin.register_modifier(:private_message_topic_tracking_state_filters) do |filters|
+          next filters unless SiteSetting.ai_bot_enabled
+
+          filters + [not_bot_pm_sql]
+        end
+
+        plugin.register_modifier(:guardian_can_send_private_message_to_target) do |allowed, params|
+          allowed ||
+            (
+              params[:private_message_context] == PERSONAL_MESSAGE_CONTEXT &&
+                params[:guardian].can_send_pm_to_ai_bot?(params[:target])
+            )
+        end
 
         plugin.on(:topic_created) do |topic|
           next if !topic.private_message?
@@ -100,7 +189,7 @@ module DiscourseAi
         plugin.register_modifier(:chat_allowed_bot_user_ids) do |user_ids, guardian|
           if guardian.user
             allowed_chat =
-              AiPersona.allowed_modalities(
+              AiAgent.allowed_modalities(
                 user: guardian.user,
                 allow_chat_direct_messages: true,
                 allow_chat_channel_mentions: true,
@@ -123,7 +212,7 @@ module DiscourseAi
         ) do |url, route|
           if route[:action] == "show" && share_key = route[:share_key]
             if conversation = SharedAiConversation.find_by(share_key: share_key)
-              conversation.onebox
+              conversation.onebox if conversation.publicly_visible?
             end
           end
         end
@@ -132,15 +221,13 @@ module DiscourseAi
           doc.css("details").remove if options && options[:strip_details]
         end
 
-        plugin.register_seedfu_fixtures(
-          Rails.root.join("plugins", "discourse-ai", "db", "fixtures", "ai_bot"),
-        )
+        plugin.register_seedfu_fixtures(Rails.root.join("plugins/discourse-ai/db/fixtures/ai_bot"))
 
         plugin.add_to_serializer(
           :topic_view,
           :is_bot_pm,
           include_condition: -> do
-            object.topic && object.personal_message &&
+            object.topic && object.topic.private_message? &&
               object.topic.custom_fields[TOPIC_AI_BOT_PM_FIELD]
           end,
         ) { true }
@@ -155,19 +242,19 @@ module DiscourseAi
 
         plugin.add_to_serializer(
           :current_user,
-          :ai_enabled_personas,
+          :ai_enabled_agents,
           include_condition: -> { scope.authenticated? },
         ) do
-          DiscourseAi::Personas::Persona
+          DiscourseAi::Agents::Agent
             .all(user: scope.user)
-            .map do |persona|
+            .map do |agent|
               {
-                id: persona.id,
-                name: persona.name,
-                description: persona.description,
-                force_default_llm: persona.force_default_llm,
-                username: persona.username,
-                allow_personal_messages: persona.allow_personal_messages,
+                id: agent.id,
+                name: agent.name,
+                description: agent.description,
+                force_default_llm: agent.force_default_llm,
+                username: agent.username,
+                allow_personal_messages: agent.allow_personal_messages,
               }
             end
         end
@@ -192,18 +279,20 @@ module DiscourseAi
         ) do
           bots_map = DiscourseAi::AiBot::EntryPoint.enabled_user_ids_and_models_map
 
-          persona_users = AiPersona.persona_users(user: scope.user)
-          if persona_users.present?
-            persona_users.filter! { |persona_user| persona_user[:username].present? }
+          agent_users = AiAgent.agent_users(user: scope.user)
+          if agent_users.present?
+            agent_users.filter! { |agent_user| agent_user[:username].present? }
 
             bots_map.concat(
-              persona_users.map do |persona_user|
+              agent_users.map do |agent_user|
                 {
-                  "id" => persona_user[:user_id],
-                  "username" => persona_user[:username],
-                  "has_default_llm" => persona_user[:default_llm_id].present?,
-                  "force_default_llm" => persona_user[:force_default_llm],
-                  "is_persona" => true,
+                  "id" => agent_user[:user_id],
+                  "username" => agent_user[:username],
+                  "has_default_llm" =>
+                    agent_user[:default_llm_id].present? ||
+                      SiteSetting.ai_default_llm_model.present?,
+                  "force_default_llm" => agent_user[:force_default_llm],
+                  "is_agent" => true,
                 }
               end,
             )
@@ -218,12 +307,13 @@ module DiscourseAi
 
         plugin.add_to_serializer(
           :topic_view,
-          :ai_persona_name,
+          :ai_agent_name,
           include_condition: -> { SiteSetting.ai_bot_enabled && object.topic.private_message? },
         ) do
-          id = topic.custom_fields["ai_persona_id"]
-          name = DiscourseAi::Personas::Persona.find_by(user: scope.user, id: id.to_i)&.name if id
-          name || topic.custom_fields["ai_persona"]
+          topic = object.topic
+          id = topic.custom_fields["ai_agent_id"]
+          name = DiscourseAi::Agents::Agent.find_by(user: scope.user, id: id.to_i)&.name if id
+          name || topic.custom_fields["ai_agent"]
         end
 
         plugin.on(:post_created) { |post| DiscourseAi::AiBot::Playground.schedule_reply(post) }
@@ -232,11 +322,24 @@ module DiscourseAi
           DiscourseAi::AiBot::Playground.schedule_chat_reply(chat_message, channel, user, context)
         end
 
-        plugin.register_editable_topic_custom_field(:ai_persona_id)
+        plugin.on(:chat_message_interaction) do |interaction|
+          DiscourseAi::AiBot::ChatToolApproval.handle_interaction(interaction)
+        end
+
+        plugin.register_editable_topic_custom_field(:ai_agent_id)
+        plugin.register_topic_custom_field_type(
+          :ai_agent_id,
+          :string,
+          max_length: TOPIC_AI_AGENT_ID_MAX_LENGTH,
+        )
+
+        plugin.on(:after_validate_topic) do |topic, topic_creator|
+          DiscourseAi::AiBot::TopicAgentValidator.validate(topic, topic_creator)
+        end
 
         plugin.add_api_key_scope(
-          :discourse_ai,
-          { stream_completion: { actions: %w[discourse_ai/admin/ai_personas#stream_reply] } },
+          :ai,
+          { stream_completion: { actions: %w[discourse_ai/admin/ai_agents#stream_reply] } },
         )
 
         plugin.on(:site_setting_changed) do |name, old_value, new_value|
@@ -244,11 +347,13 @@ module DiscourseAi
                new_value != old_value
             RagDocumentFragment.delete_all
             UploadReference
-              .where(target: AiPersona.all)
+              .where(target: AiAgent.all)
               .each do |ref|
                 Jobs.enqueue(
                   :digest_rag_upload,
-                  ai_persona_id: ref.target_id,
+                  target_type: ref.target_type,
+                  target_id: ref.target_id,
+                  ai_agent_id: ref.target_id,
                   upload_id: ref.upload_id,
                 )
               end

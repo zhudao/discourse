@@ -1,7 +1,11 @@
 /* eslint-disable ember/no-classic-components */
 import Component from "@ember/component";
+import { computed } from "@ember/object";
+import { service } from "@ember/service";
 import { tagName } from "@ember-decorators/component";
-import discourseComputed from "discourse/lib/decorators";
+import categoryListSubcategories, {
+  hasGrandchildren,
+} from "discourse/helpers/category-list-subcategories";
 import { applyValueTransformer } from "discourse/lib/transformer";
 
 const LIST_TYPE = {
@@ -11,22 +15,24 @@ const LIST_TYPE = {
 
 @tagName("")
 export default class CategoryListItem extends Component {
+  @service discovery;
+
   category = null;
   listType = LIST_TYPE.NORMAL;
 
-  @discourseComputed("category.isHidden", "category.hasMuted", "listType")
-  isHidden(isHiddenCategory, hasMuted, listType) {
+  @computed("category.isHidden", "category.hasMuted", "listType")
+  get isHidden() {
     return (
-      (isHiddenCategory && listType === LIST_TYPE.NORMAL) ||
-      (!hasMuted && listType === LIST_TYPE.MUTED)
+      (this.category?.isHidden && this.listType === LIST_TYPE.NORMAL) ||
+      (!this.category?.hasMuted && this.listType === LIST_TYPE.MUTED)
     );
   }
 
-  @discourseComputed("category.isMuted", "listType")
-  isMuted(isMutedCategory, listType) {
+  @computed("category.isMuted", "listType")
+  get isMuted() {
     return (
-      (isMutedCategory && listType === LIST_TYPE.NORMAL) ||
-      (!isMutedCategory && listType === LIST_TYPE.MUTED)
+      (this.category?.isMuted && this.listType === LIST_TYPE.NORMAL) ||
+      (!this.category?.isMuted && this.listType === LIST_TYPE.MUTED)
     );
   }
 
@@ -38,9 +44,21 @@ export default class CategoryListItem extends Component {
     return this.category.newTopicsCount;
   }
 
-  @discourseComputed("category.path")
-  slugPath(categoryPath) {
-    return categoryPath.substring("/c/".length);
+  @computed("category.path")
+  get slugPath() {
+    return this.category?.path?.substring("/c/".length);
+  }
+
+  get page() {
+    return this.categoryListPage ?? this.discovery.categoryListPage;
+  }
+
+  get displayedSubcategories() {
+    return categoryListSubcategories(this.category, { page: this.page });
+  }
+
+  get showsGrandchildren() {
+    return hasGrandchildren(this.displayedSubcategories, { page: this.page });
   }
 
   applyValueTransformer(name, value, context) {

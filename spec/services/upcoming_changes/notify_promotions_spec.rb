@@ -11,6 +11,8 @@ RSpec.describe UpcomingChanges::NotifyPromotions do
     let(:show_user_menu_avatars_status) { :beta }
 
     before do
+      # No upcoming change notifications are sent for new sites
+      UpcomingChanges.stubs(:should_notify_admins?).returns(true)
       SiteSetting.promote_upcoming_changes_on_status = :stable
       SiteSetting.stubs(:upcoming_change_site_settings).returns(
         %i[enable_upload_debug_mode show_user_menu_avatars],
@@ -104,12 +106,10 @@ RSpec.describe UpcomingChanges::NotifyPromotions do
         }.by(2)
 
         notification = Notification.where("data::text LIKE ?", "%enable_upload_debug_mode%").last
-        expect(notification.data).to eq(
-          {
-            upcoming_change_name: :enable_upload_debug_mode,
-            upcoming_change_humanized_name: "Enable upload debug mode",
-          }.to_json,
-        )
+        data = JSON.parse(notification.data)
+        expect(data["upcoming_change_names"]).to eq(["enable_upload_debug_mode"])
+        expect(data["upcoming_change_humanized_names"]).to eq(["Enable upload debug mode"])
+        expect(data["count"]).to eq(1)
       end
 
       it "creates an admins_notified_automatic_promotion event" do
@@ -136,13 +136,22 @@ RSpec.describe UpcomingChanges::NotifyPromotions do
       context "when multiple settings meet promotion criteria" do
         let(:show_user_menu_avatars_status) { :stable }
 
-        it "processes all eligible settings" do
-          expect { result }.to change {
+        it "processes all eligible settings into consolidated notifications" do
+          result
+
+          notifications =
             Notification.where(
               notification_type: Notification.types[:upcoming_change_automatically_promoted],
               user_id: [admin.id, admin_2.id],
-            ).count
-          }.by(4)
+            )
+          expect(notifications.count).to eq(2)
+
+          data = JSON.parse(notifications.first.data)
+          expect(data["upcoming_change_names"]).to contain_exactly(
+            "enable_upload_debug_mode",
+            "show_user_menu_avatars",
+          )
+          expect(data["count"]).to eq(2)
         end
 
         it "creates events for all promoted settings" do
@@ -201,16 +210,16 @@ RSpec.describe UpcomingChanges::NotifyPromotions do
         end
       end
 
-      context "when settings are already notified about promotion" do
+      context "when settings have already been promoted" do
         before do
           UpcomingChangeEvent.create!(
-            event_type: :admins_notified_automatic_promotion,
+            event_type: :automatically_promoted,
             upcoming_change_name: :enable_upload_debug_mode,
             acting_user: Discourse.system_user,
           )
         end
 
-        it "does not notify admins again for the already-notified setting" do
+        it "does not notify admins again for the already-promoted setting" do
           expect { result }.not_to change {
             Notification
               .where(notification_type: Notification.types[:upcoming_change_automatically_promoted])
@@ -219,7 +228,7 @@ RSpec.describe UpcomingChanges::NotifyPromotions do
           }
         end
 
-        it "does not trigger event for the already-notified setting" do
+        it "does not trigger event for the already-promoted setting" do
           events = DiscourseEvent.track_events { result }
           expect(
             events.select do |e|
@@ -232,8 +241,70 @@ RSpec.describe UpcomingChanges::NotifyPromotions do
         it "returns the correct error and error key" do
           expect(result[:change_notification_statuses][:enable_upload_debug_mode]).to match(
             success: false,
-            error: "Setting enable_upload_debug_mode has already notified admins about promotion",
-            error_key: :already_notified_about_promotion,
+            error: "Setting enable_upload_debug_mode has already been promoted",
+            error_key: :already_promoted,
+          )
+        end
+      end
+
+      context "when settings are marked as already notified about, but not promoted" do
+        before do
+          UpcomingChangeEvent.create!(
+            event_type: :admins_notified_automatic_promotion,
+            upcoming_change_name: :enable_upload_debug_mode,
+            acting_user: Discourse.system_user,
+          )
+        end
+
+        it "does not notify admins" do
+          expect { result }.not_to change {
+            Notification
+              .where(notification_type: Notification.types[:upcoming_change_automatically_promoted])
+              .where("data::text LIKE ?", "%enable_upload_debug_mode%")
+              .count
+          }
+        end
+
+        it "still promotes the change, so its side effects run" do
+          events = DiscourseEvent.track_events { result }
+
+          expect(
+            events.select do |e|
+              e[:event_name] == :upcoming_change_enabled &&
+                e[:params].first == :enable_upload_debug_mode
+            end,
+          ).to be_present
+          expect(
+            UpcomingChangeEvent.exists?(
+              event_type: :automatically_promoted,
+              upcoming_change_name: :enable_upload_debug_mode,
+            ),
+          ).to eq(true)
+        end
+      end
+
+      context "when a change should not be displayed on this site" do
+        before do
+          UpcomingChanges::ConditionalDisplay.stubs(
+            :should_display_enable_upload_debug_mode?,
+          ).returns(false)
+        end
+
+        it "does not notify admins for the hidden setting" do
+          expect { result }.not_to change {
+            Notification
+              .where(notification_type: Notification.types[:upcoming_change_automatically_promoted])
+              .where("data::text LIKE ?", "%enable_upload_debug_mode%")
+              .count
+          }
+        end
+
+        it "returns the correct error and error key" do
+          expect(result[:change_notification_statuses][:enable_upload_debug_mode]).to match(
+            success: false,
+            error:
+              "Setting enable_upload_debug_mode is not displayed on this site, skipping promotion notification",
+            error_key: :should_not_be_displayed,
           )
         end
       end

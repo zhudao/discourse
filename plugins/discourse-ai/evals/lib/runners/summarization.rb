@@ -10,7 +10,7 @@ module DiscourseAi
           full_feature_name&.start_with?("summarization:")
         end
 
-        def run(eval_case, llm)
+        def run(eval_case, llm, execution_context:)
           args = eval_case.args
           conversation = extract_conversation(args)
           user = Discourse.system_user
@@ -27,11 +27,11 @@ module DiscourseAi
               { poster: user.username, id: index + 1, text: text }
             end
 
-          persona_class, strategy = persona_and_strategy(topic)
-          persona = resolve_persona(persona_class: persona_class)
+          agent_class, strategy = agent_and_strategy(topic)
+          agent = resolve_agent(agent_class: agent_class)
 
           context =
-            DiscourseAi::Personas::BotContext.new(
+            DiscourseAi::Agents::BotContext.new(
               user: user,
               skip_show_thinking: true,
               feature_name: "evals/#{feature_name}",
@@ -39,32 +39,37 @@ module DiscourseAi
               messages: strategy.as_llm_messages(content),
             )
 
-          summary = capture_summary(persona, user, llm, context)
+          summary = capture_summary(agent, user, llm, context, execution_context:)
 
           wrap_result(summary, { feature: feature_name })
         end
 
         private
 
-        def persona_and_strategy(topic)
+        def agent_and_strategy(topic)
           if regular_summaries?
             [
-              DiscourseAi::Personas::Summarizer,
+              DiscourseAi::Agents::Summarizer,
               DiscourseAi::Summarization::Strategies::TopicSummary.new(topic),
             ]
           elsif gists?
             [
-              DiscourseAi::Personas::ShortSummarizer,
-              DiscourseAi::Summarization::Strategies::HotTopicGists.new(topic),
+              DiscourseAi::Agents::ShortSummarizer,
+              DiscourseAi::Summarization::Strategies::HotTopicGists.new(
+                topic,
+                locale: SiteSetting.default_locale,
+              ),
             ]
           else
             raise "Unknown summary type"
           end
         end
 
-        def capture_summary(persona, user, llm, context)
-          bot = DiscourseAi::Personas::Bot.as(user, persona: persona, model: llm)
-          schema = persona.response_format&.first
+        def capture_summary(agent, user, llm, context, execution_context:)
+          bot = DiscourseAi::Agents::Bot.as(user, agent: agent, model: llm)
+          return capture_tool_response(bot, context, execution_context:) if gists?
+
+          schema = agent.response_format&.first
 
           if schema.present?
             capture_structured_response(
@@ -72,10 +77,25 @@ module DiscourseAi
               context,
               schema_key: schema["key"],
               schema_type: schema["type"],
+              execution_context:,
             )
           else
-            capture_plain_response(bot, context)
+            capture_plain_response(bot, context, execution_context:)
           end
+        end
+
+        def capture_tool_response(bot, context, execution_context:)
+          summary = nil
+          bot.reply(context, execution_context:) do |partial, _, type|
+            summary = partial.to_s if type == :custom_raw
+          end
+
+          if summary.blank?
+            raise DiscourseAi::Summarization::FoldContent::MissingToolOutput,
+                  "The model did not set a topic summary"
+          end
+
+          summary
         end
 
         def extract_conversation(args)

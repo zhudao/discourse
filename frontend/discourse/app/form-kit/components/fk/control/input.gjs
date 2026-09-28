@@ -1,7 +1,9 @@
-import Component from "@glimmer/component";
 import { on } from "@ember/modifier";
 import { action } from "@ember/object";
-import concatClass from "discourse/helpers/concat-class";
+import { service } from "@ember/service";
+import FKBaseControl from "discourse/form-kit/components/fk/control/base";
+import { siteDir } from "discourse/lib/text-direction";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
 
 const SUPPORTED_TYPES = [
   "color",
@@ -21,11 +23,13 @@ const SUPPORTED_TYPES = [
   "week",
 ];
 
-export default class FKControlInput extends Component {
+export default class FKControlInput extends FKBaseControl {
   static controlType = "input";
 
+  @service siteSettings;
+
   constructor(owner, args) {
-    super(...arguments);
+    super(owner, args);
 
     if (["checkbox", "radio"].includes(args.type)) {
       throw new Error(
@@ -40,18 +44,38 @@ export default class FKControlInput extends Component {
         }", must be one of ${SUPPORTED_TYPES.join(", ")}!`
       );
     }
+
+    // Legacy path: when @type is not set on <form.Field />,
+    // set the specific input type (e.g. "input-number") on the field.
+    if (!args.field.hasExplicitType) {
+      args.field.type = "input-" + (args.type ?? "text");
+    }
   }
 
   get type() {
     return this.args.type ?? "text";
   }
 
+  get dir() {
+    if (!this.siteSettings.support_mixed_text_direction) {
+      return;
+    }
+
+    return this.args.field.value ? "auto" : siteDir();
+  }
+
   get displayValue() {
-    if (this.type === "number" && this.inputValue !== undefined) {
+    const fieldValue = this.args.field.value;
+
+    if (
+      this.type === "number" &&
+      this.inputValue !== undefined &&
+      Object.is(parseFloat(this.inputValue), parseFloat(fieldValue))
+    ) {
       return this.inputValue;
     }
 
-    return this.args.field.value ?? "";
+    return fieldValue ?? "";
   }
 
   @action
@@ -91,14 +115,20 @@ export default class FKControlInput extends Component {
       {{/if}}
 
       <input
-        type={{this.type}}
-        value={{this.displayValue}}
-        class={{concatClass
+        aria-describedby={{@field.describedBy}}
+        aria-invalid={{if @field.error "true"}}
+        class={{dConcatClass
           "form-kit__control-input"
           (if @before "has-prefix")
           (if @after "has-suffix")
         }}
+        dir={{this.dir}}
         disabled={{@field.disabled}}
+        id={{@field.id}}
+        name={{@field.name}}
+        placeholder={{@field.placeholder}}
+        type={{this.type}}
+        value={{this.displayValue}}
         ...attributes
         {{on "focus" this.handleFocus}}
         {{on "blur" this.handleBlur}}

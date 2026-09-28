@@ -1,9 +1,12 @@
 # frozen_string_literal: true
 
-describe "Admin Dashboard Community Health", type: :system do
+describe "Admin Dashboard Community Health" do
   fab!(:current_user, :admin)
 
-  before { sign_in(current_user) }
+  before do
+    SiteSetting.dashboard_improvements = false
+    sign_in(current_user)
+  end
 
   describe "Pageview Report" do
     context "when use_legacy_pageviews is true" do

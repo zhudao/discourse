@@ -13,22 +13,31 @@ RSpec.describe Admin::EmailTemplatesController do
   let(:original_body) { original_text("user_notifications.admin_login.text_body_template") }
   let(:headers) { { ACCEPT: "application/json" } }
 
-  after do
-    TranslationOverride.delete_all
-    I18n.reload!
-  end
+  after { I18n.reload! }
 
   describe "#index" do
     context "when logged in as an admin" do
       before { sign_in(admin) }
 
-      it "should work if you are an admin" do
+      it "allows an administrator to update the template" do
         get "/admin/email/templates.json"
 
         expect(response.status).to eq(200)
 
         json = response.parsed_body
         expect(json["email_templates"]).to be_present
+      end
+
+      it "includes the password reset code template" do
+        get "/admin/email/templates.json"
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["email_templates"]).to include(
+          a_hash_including(
+            "id" => "password_reset_code_mailer",
+            "interpolation_keys" => %w[code minutes site_name],
+          ),
+        )
       end
 
       it "returns overridden = true if subject or body has translation_overrides record" do
@@ -55,6 +64,39 @@ RSpec.describe Admin::EmailTemplatesController do
         templates = response.parsed_body["email_templates"]
         template = templates.find { |t| t["id"] == "user_notifications.admin_login" }
         expect(template["can_revert"]).to eq(false)
+      end
+
+      it "returns interpolation_keys for each email template" do
+        get "/admin/email/templates.json"
+        expect(response.status).to eq(200)
+
+        templates = response.parsed_body["email_templates"]
+        template = templates.find { |t| t["id"] == "user_notifications.admin_login" }
+
+        expect(template["interpolation_keys"]).to eq(
+          %w[base_url email_prefix email_token site_name],
+        )
+      end
+
+      it "returns interpolation_keys from body when subject is pluralized" do
+        get "/admin/email/templates.json"
+        expect(response.status).to eq(200)
+
+        templates = response.parsed_body["email_templates"]
+        template = templates.find { |t| t["id"] == "system_messages.pending_users_reminder" }
+
+        expect(template["interpolation_keys"]).to eq(%w[base_url])
+      end
+
+      it "returns empty interpolation_keys for templates without any keys" do
+        get "/admin/email/templates.json"
+        expect(response.status).to eq(200)
+
+        templates = response.parsed_body["email_templates"]
+        template =
+          templates.find { |t| t["id"] == "system_messages.download_remote_images_disabled" }
+
+        expect(template["interpolation_keys"]).to eq([])
       end
 
       it "includes custom email template keys added via modifier" do
@@ -239,6 +281,25 @@ RSpec.describe Admin::EmailTemplatesController do
         include_examples "invalid email template"
       end
 
+      context "when body contains malformed interpolation keys" do
+        let(:email_subject) { "%{email_prefix} Foo" }
+        let(:email_body) { "Hello %{user.username}" }
+
+        let(:expected_errors) do
+          [
+            "<b>Body</b>: #{
+              I18n.t(
+                "activerecord.errors.models.translation_overrides.attributes.value.invalid_interpolation_keys",
+                keys: "user.username",
+                count: 1,
+              )
+            }",
+          ]
+        end
+
+        include_examples "invalid email template"
+      end
+
       context "when subject and body contain all required interpolation keys" do
         let(:email_subject) { "%{email_prefix} Foo" }
         let(:email_body) { "The body contains [%{site_name}](%{base_url}) and %{email_token}." }
@@ -308,7 +369,7 @@ RSpec.describe Admin::EmailTemplatesController do
         end
       end
 
-      context "when subject has plural keys" do
+      context "when subject or body has plural keys" do
         it "doesn't update the subject" do
           old_subject = I18n.t("system_messages.pending_users_reminder.subject_template")
           expect(old_subject).to be_a(Hash)
@@ -330,6 +391,54 @@ RSpec.describe Admin::EmailTemplatesController do
           expect(I18n.t("system_messages.pending_users_reminder.text_body_template")).to eq(
             "Lorem ipsum",
           )
+        end
+
+        it "returns validation errors without creating overrides for pluralized templates" do
+          templates = [
+            {
+              key: "system_messages.pending_users_reminder",
+              subject: "",
+              body: "Body with %{invalid} interpolation key",
+              invalid_attribute: "Body",
+            },
+            {
+              key: "system_messages.reviewables_reminder",
+              subject: "Subject with %{invalid} interpolation key",
+              body: "",
+              invalid_attribute: "Subject",
+            },
+          ]
+
+          templates.each do |template|
+            subject_key = "#{template[:key]}.subject_template"
+            body_key = "#{template[:key]}.text_body_template"
+            expect([I18n.t(subject_key), I18n.t(body_key)]).to include(be_a(Hash))
+
+            put "/admin/email/templates/#{template[:key]}",
+                params: {
+                  email_template: template.slice(:subject, :body),
+                },
+                headers: headers
+
+            expect(response.status).to eq(422)
+            expect(response.parsed_body["errors"]).to eq(
+              [
+                "<b>#{template[:invalid_attribute]}</b>: #{
+                  I18n.t(
+                    "activerecord.errors.models.translation_overrides.attributes.value.invalid_interpolation_keys",
+                    keys: "invalid",
+                    count: 1,
+                  )
+                }",
+              ],
+            )
+            expect(
+              TranslationOverride.where(
+                locale: I18n.locale,
+                translation_key: [subject_key, body_key],
+              ),
+            ).to be_empty
+          end
         end
       end
     end

@@ -1,7 +1,7 @@
 /* eslint-disable ember/no-classic-components */
 import Component from "@ember/component";
 import { hash } from "@ember/helper";
-import { action } from "@ember/object";
+import { action, computed } from "@ember/object";
 import { dependentKeyCompat } from "@ember/object/compat";
 import { service } from "@ember/service";
 import { tagName } from "@ember-decorators/component";
@@ -9,21 +9,23 @@ import BreadCrumbs from "discourse/components/bread-crumbs";
 import BulkSelectToggle from "discourse/components/bulk-select-toggle";
 import CategoryNotificationsTracking from "discourse/components/category-notifications-tracking";
 import CreateTopicButton from "discourse/components/create-topic-button";
-import DButton from "discourse/components/d-button";
 import NavigationBar from "discourse/components/navigation-bar";
 import PluginOutlet from "discourse/components/plugin-outlet";
 import TagInfoButton from "discourse/components/tag-info-button";
 import TagNotificationsTracking from "discourse/components/tag-notifications-tracking";
 import TopicDismissButtons from "discourse/components/topic-dismiss-buttons";
 import lazyHash from "discourse/helpers/lazy-hash";
-import { setting } from "discourse/lib/computed";
-import discourseComputed from "discourse/lib/decorators";
 import { filterTypeForMode } from "discourse/lib/filter-mode";
 import { NotificationLevels } from "discourse/lib/notification-levels";
-import { applyValueTransformer } from "discourse/lib/transformer";
+import {
+  applyBehaviorTransformer,
+  applyValueTransformer,
+} from "discourse/lib/transformer";
 import NavItem from "discourse/models/nav-item";
 import CategoriesAdminDropdown from "discourse/select-kit/components/categories-admin-dropdown";
+import TagCategoryAdminDropdown from "discourse/select-kit/components/tag-category-admin-dropdown";
 import { and, gt } from "discourse/truth-helpers";
+import DButton from "discourse/ui-kit/d-button";
 
 @tagName("")
 export default class DNavigation extends Component {
@@ -32,20 +34,42 @@ export default class DNavigation extends Component {
   @service siteSettings;
   @service currentUser;
 
-  @setting("fixed_category_positions") fixedCategoryPositions;
-
-  get canEditTags() {
-    return this.currentUser?.canEditTags;
+  @computed("siteSettings.fixed_category_positions")
+  get fixedCategoryPositions() {
+    return this.siteSettings.fixed_category_positions;
   }
 
+  @computed("category", "site.shared_drafts_category_id", "site.desktopView")
   get createTopicLabel() {
     const defaultKey = "topic.create";
+    let value = this.site.desktopView ? defaultKey : "";
 
-    return applyValueTransformer(
-      "create-topic-label",
-      this.site.desktopView ? defaultKey : "",
-      { site: this.site, defaultKey }
-    );
+    if (
+      value === defaultKey &&
+      this.site.shared_drafts_category_id &&
+      this.category?.id === this.site.shared_drafts_category_id
+    ) {
+      value = "topic.create_shared_draft";
+    }
+
+    return applyValueTransformer("create-topic-label", value, {
+      site: this.site,
+      defaultKey,
+      category: this.category,
+      currentUser: this.currentUser,
+    });
+  }
+
+  @computed("category")
+  get createTopicIcon() {
+    const defaultIcon = "far-pen-to-square";
+
+    return applyValueTransformer("create-topic-icon", defaultIcon, {
+      site: this.site,
+      defaultIcon,
+      category: this.category,
+      currentUser: this.currentUser,
+    });
   }
 
   get showBulkSelectInNavControls() {
@@ -69,8 +93,8 @@ export default class DNavigation extends Component {
 
   // Should be a `readOnly` instead but some themes/plugins still pass
   // the `categories` property into this component
-  @discourseComputed()
-  categories() {
+  @computed()
+  get categories() {
     let categories = this.site.categoriesList;
 
     if (!this.siteSettings.allow_uncategorized_topics) {
@@ -89,13 +113,13 @@ export default class DNavigation extends Component {
     return categories;
   }
 
-  @discourseComputed("category")
-  showCategoryNotifications(category) {
-    return category && this.currentUser;
+  @computed("category")
+  get showCategoryNotifications() {
+    return this.category && this.currentUser;
   }
 
-  @discourseComputed("category.notification_level")
-  categoryNotificationLevel(notificationLevel) {
+  @computed("category.notification_level")
+  get categoryNotificationLevel() {
     if (
       this.currentUser?.indirectly_muted_category_ids?.includes(
         this.category.id
@@ -103,37 +127,61 @@ export default class DNavigation extends Component {
     ) {
       return NotificationLevels.MUTED;
     } else {
-      return notificationLevel;
+      return this.category?.notification_level;
     }
   }
 
   // don't show tag notification menu on tag intersections
-  @discourseComputed("tagNotification", "additionalTags")
-  showTagNotifications(tagNotification, additionalTags) {
-    return tagNotification && !additionalTags;
+  @computed("tagNotification", "additionalTags")
+  get showTagNotifications() {
+    return this.tagNotification && !this.additionalTags;
   }
 
-  @discourseComputed("category", "createTopicDisabled")
-  categoryReadOnlyBanner(category, createTopicDisabled) {
-    if (category && this.currentUser && createTopicDisabled) {
-      return category.read_only_banner;
+  @computed("category", "createTopicDisabled")
+  get categoryReadOnlyBanner() {
+    if (this.category && this.currentUser && this.createTopicDisabled) {
+      return this.category.read_only_banner;
     }
   }
 
-  @discourseComputed("category.can_edit")
-  showCategoryEdit(canEdit) {
-    return canEdit;
+  @computed("category.can_edit")
+  get showCategoryEdit() {
+    return this.category?.can_edit;
   }
 
-  @discourseComputed("additionalTags", "category", "tag.name")
-  showToggleInfo(additionalTags, category, tagId) {
-    if (this.siteSettings.experimental_tag_settings_page) {
-      return this.currentUser;
-    }
-    return !additionalTags && !category && tagId !== "none";
+  @computed("tag", "tag.name", "additionalTags", "currentUser.canEditTags")
+  get showTagEdit() {
+    return (
+      this.tag &&
+      this.tag.name !== "none" &&
+      !this.additionalTags &&
+      this.currentUser?.canEditTags
+    );
   }
 
-  @discourseComputed(
+  @computed("toggleTagInfo", "tag", "tag.name", "additionalTags", "category")
+  get showTagInfoButton() {
+    return (
+      this.toggleTagInfo &&
+      this.tag &&
+      this.tag.name !== "none" &&
+      !this.additionalTags &&
+      !this.category
+    );
+  }
+
+  @computed(
+    "category.can_edit",
+    "tag",
+    "tag.name",
+    "additionalTags",
+    "currentUser.canEditTags"
+  )
+  get showCombinedAdminDropdown() {
+    return this.category?.can_edit && this.showTagEdit;
+  }
+
+  @computed(
     "filterType",
     "category",
     "noSubcategories",
@@ -141,27 +189,35 @@ export default class DNavigation extends Component {
     "router.currentRoute.queryParams",
     "skipCategoriesNavItem"
   )
-  navItems(
-    filterType,
-    category,
-    noSubcategories,
-    tag,
-    currentRouteQueryParams,
-    skipCategoriesNavItem
-  ) {
-    return NavItem.buildList(category, {
-      filterType,
-      noSubcategories,
-      currentRouteQueryParams,
-      tag,
+  get navItems() {
+    const items = NavItem.buildList(this.category, {
+      filterType: this.filterType,
+      noSubcategories: this.noSubcategories,
+      currentRouteQueryParams: this.router?.currentRoute?.queryParams,
+      tag: this.tag,
       siteSettings: this.siteSettings,
-      skipCategoriesNavItem,
+      skipCategoriesNavItem: this.skipCategoriesNavItem,
+    });
+
+    return applyValueTransformer("navigation-items", items, {
+      category: this.category,
+      tag: this.tag,
+      filterType: this.filterType,
     });
   }
 
-  @discourseComputed("filterType")
-  notCategoriesRoute(filterType) {
-    return filterType !== "categories";
+  @computed("showResetNew", "filterType", "currentUser.unified_new_enabled")
+  get showNewDismissCombo() {
+    return (
+      this.showResetNew &&
+      this.filterType === "new" &&
+      this.currentUser.unified_new_enabled
+    );
+  }
+
+  @computed("filterType")
+  get notCategoriesRoute() {
+    return this.filterType !== "categories";
   }
 
   @action
@@ -201,22 +257,48 @@ export default class DNavigation extends Component {
   }
 
   @action
-  clickCreateTopicButton() {
-    this.createTopic();
+  handleTagCategoryAdmin(actionId) {
+    switch (actionId) {
+      case "editCategory":
+        this.editCategory();
+        break;
+      case "editTag":
+        this.router.transitionTo(
+          "tag.edit.tab",
+          this.tag.slug,
+          this.tag.id,
+          "general"
+        );
+        break;
+    }
   }
 
   @action
-  clickTagInfo() {
-    this.toggleInfo();
+  clickCreateTopicButton() {
+    applyBehaviorTransformer(
+      "create-topic-button-click",
+      () => this.createTopic(),
+      { category: this.category, tag: this.tag }
+    );
+  }
+
+  @action
+  editTag() {
+    this.router.transitionTo(
+      "tag.edit.tab",
+      this.tag.slug,
+      this.tag.id,
+      "general"
+    );
   }
 
   <template>
     <BreadCrumbs
+      @additionalTags={{this.additionalTags}}
       @categories={{this.categories}}
       @category={{this.category}}
       @noSubcategories={{this.noSubcategories}}
       @tag={{this.tag}}
-      @additionalTags={{this.additionalTags}}
     />
 
     <PluginOutlet
@@ -232,9 +314,9 @@ export default class DNavigation extends Component {
     {{#unless this.additionalTags}}
       {{! nav bar doesn't work with tag intersections }}
       <NavigationBar
-        @navItems={{this.navItems}}
-        @filterMode={{this.filterMode}}
         @category={{this.category}}
+        @filterMode={{this.filterMode}}
+        @navItems={{this.navItems}}
         @tag={{this.tag}}
       />
     {{/unless}}
@@ -245,13 +327,14 @@ export default class DNavigation extends Component {
       {{/if}}
 
       <TopicDismissButtons
-        @position="top"
-        @selectedTopics={{@bulkSelectHelper.selected}}
-        @model={{@model}}
-        @showResetNew={{@showResetNew}}
-        @showDismissRead={{@showDismissRead}}
-        @resetNew={{@resetNew}}
         @dismissRead={{@dismissRead}}
+        @model={{@model}}
+        @position="top"
+        @resetNew={{@resetNew}}
+        @selectedTopics={{@bulkSelectHelper.selected}}
+        @showDismissRead={{@showDismissRead}}
+        @showNewDismissCombo={{this.showNewDismissCombo}}
+        @showResetNew={{@showResetNew}}
       />
 
       {{#if this.showCategoryAdmin}}
@@ -262,6 +345,8 @@ export default class DNavigation extends Component {
           />
         {{else}}
           <DButton
+            class="btn-default"
+            id="create-category"
             @action={{this.createCategory}}
             @icon="plus"
             @label={{if
@@ -269,39 +354,45 @@ export default class DNavigation extends Component {
               "categories.category"
               "category.create"
             }}
-            class="btn-default"
-            id="create-category"
           />
         {{/if}}
       {{/if}}
 
-      {{#if (and this.category this.showCategoryEdit)}}
-        <DButton
-          @action={{this.editCategory}}
-          @icon="wrench"
-          @title="category.edit_title"
-          class="btn-default edit-category"
+      {{#if this.showCombinedAdminDropdown}}
+        <TagCategoryAdminDropdown
+          @category={{this.category}}
+          @onChange={{this.handleTagCategoryAdmin}}
+          @options={{hash triggerOnChangeOnTab=false}}
+          @tag={{this.tag}}
         />
+      {{else}}
+        {{#if (and this.category this.showCategoryEdit)}}
+          <DButton
+            class="btn-default edit-category"
+            @action={{this.editCategory}}
+            @icon="wrench"
+            @title="category.edit_title"
+          />
+        {{/if}}
+
+        {{#if this.showTagEdit}}
+          <DButton
+            class="btn-default"
+            id="edit-tag"
+            @action={{this.editTag}}
+            @ariaLabel="tagging.edit"
+            @icon="wrench"
+            @title="tagging.edit"
+          />
+        {{/if}}
       {{/if}}
 
-      {{#if this.tag}}
-        {{#if this.showToggleInfo}}
-          {{#if this.siteSettings.experimental_tag_settings_page}}
-            <TagInfoButton
-              @tag={{this.tag}}
-              @currentUser={{this.currentUser}}
-            />
-          {{else}}
-            <DButton
-              @icon={{if this.canEditTags "wrench" "circle-info"}}
-              @ariaLabel={{if this.canEditTags "tagging.edit" "tagging.info"}}
-              @title={{if this.canEditTags "tagging.edit" "tagging.info"}}
-              @action={{this.clickTagInfo}}
-              id="show-tag-info"
-              class="btn-default"
-            />
-          {{/if}}
-        {{/if}}
+      {{#if this.showTagInfoButton}}
+        <TagInfoButton
+          @active={{@showTagInfo}}
+          @loading={{@loadingTagInfo}}
+          @toggleInfo={{@toggleTagInfo}}
+        />
       {{/if}}
 
       <PluginOutlet
@@ -317,13 +408,14 @@ export default class DNavigation extends Component {
       />
 
       <CreateTopicButton
-        @canCreateTopic={{this.canCreateTopic}}
         @action={{this.clickCreateTopicButton}}
-        @label={{this.createTopicLabel}}
         @btnTypeClass={{if
           this.siteSettings.modernize_foundation_theme
           "btn-primary"
         }}
+        @canCreateTopic={{this.canCreateTopic}}
+        @icon={{this.createTopicIcon}}
+        @label={{this.createTopicLabel}}
         @showDrafts={{if (gt this.draftCount 0) true false}}
       />
 
@@ -345,9 +437,9 @@ export default class DNavigation extends Component {
             {{#unless this.category.deleted}}
               <CategoryNotificationsTracking
                 @levelId={{this.categoryNotificationLevel}}
-                @showFullTitle={{false}}
-                @showCaret={{false}}
                 @onChange={{this.changeCategoryNotificationLevel}}
+                @showCaret={{false}}
+                @showFullTitle={{false}}
               />
             {{/unless}}
           {{/if}}
@@ -359,8 +451,8 @@ export default class DNavigation extends Component {
           {{! don't show tag notification menu on category pages }}
           {{#if this.showTagNotifications}}
             <TagNotificationsTracking
-              @onChange={{this.changeTagNotificationLevel}}
               @levelId={{this.tagNotification.notification_level}}
+              @onChange={{this.changeTagNotificationLevel}}
             />
           {{/if}}
         {{/unless}}

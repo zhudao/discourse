@@ -1,5 +1,5 @@
 import { action } from "@ember/object";
-import { htmlSafe } from "@ember/template";
+import { trustHTML } from "@ember/template";
 import { findOrResetCachedTopicList } from "discourse/lib/cached-topic-list";
 import getURL from "discourse/lib/get-url";
 import { iconHTML } from "discourse/lib/icon-library";
@@ -96,6 +96,9 @@ export default (inboxType, path, filter) => {
       const pmSearchContext = {
         ...this.controllerFor("user").get("model.searchContext"),
         type: "private_messages",
+        // set by the group inbox subclass in `afterModel`, so a consumer can
+        // scope to that inbox rather than to every message the user can see
+        group: this.group,
       };
       this.searchService.searchContext = pmSearchContext;
     }
@@ -103,7 +106,7 @@ export default (inboxType, path, filter) => {
     emptyState() {
       const title = i18n("user.no_messages_title");
       const body = this.currentUser?.can_send_private_messages
-        ? htmlSafe(
+        ? trustHTML(
             i18n("user.no_messages_body", {
               aboutUrl: getURL("/about"),
               icon: iconHTML("envelope"),

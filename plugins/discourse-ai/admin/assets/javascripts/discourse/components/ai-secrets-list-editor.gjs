@@ -2,10 +2,10 @@ import Component from "@glimmer/component";
 import { LinkTo } from "@ember/routing";
 import { service } from "@ember/service";
 import AdminConfigAreaEmptyList from "discourse/admin/components/admin-config-area-empty-list";
-import DBreadcrumbsItem from "discourse/components/d-breadcrumbs-item";
-import DButton from "discourse/components/d-button";
-import DPageSubheader from "discourse/components/d-page-subheader";
 import { eq } from "discourse/truth-helpers";
+import DBreadcrumbsItem from "discourse/ui-kit/d-breadcrumbs-item";
+import DButton from "discourse/ui-kit/d-button";
+import DPageSubheader from "discourse/ui-kit/d-page-subheader";
 import { i18n } from "discourse-i18n";
 import AiSecretEditorForm from "./ai-secret-editor-form";
 
@@ -18,30 +18,30 @@ export default class AiSecretsListEditor extends Component {
 
   <template>
     <DBreadcrumbsItem
-      @path="/admin/plugins/{{this.adminPluginNavManager.currentPlugin.name}}/ai-secrets"
       @label={{i18n "discourse_ai.secrets.short_title"}}
+      @path="/admin/plugins/{{this.adminPluginNavManager.currentPlugin.name}}/ai-secrets"
     />
     <section class="ai-secret-list-editor admin-detail">
       {{#if @currentSecret}}
         <AiSecretEditorForm @model={{@currentSecret}} @secrets={{@secrets}} />
       {{else}}
         <DPageSubheader
-          @titleLabel={{i18n "discourse_ai.secrets.short_title"}}
           @descriptionLabel={{i18n "discourse_ai.secrets.description"}}
+          @titleLabel={{i18n "discourse_ai.secrets.short_title"}}
         >
           <:actions as |actions|>
             <actions.Primary
+              class="ai-secret-list-editor__new-btn"
+              @icon="plus"
               @label="discourse_ai.secrets.create_new"
               @route="adminPlugins.show.discourse-ai-secrets.new"
-              @icon="plus"
-              class="ai-secret-list-editor__new-btn"
             />
           </:actions>
         </DPageSubheader>
 
         {{#if this.hasSecrets}}
-          <table class="d-admin-table ai-secret-list-editor__table">
-            <thead>
+          <table class="d-table ai-secret-list-editor__table">
+            <thead class="d-table__header">
               <tr>
                 <th>{{i18n "discourse_ai.secrets.name"}}</th>
                 <th>{{i18n "discourse_ai.secrets.used_by"}}</th>
@@ -51,14 +51,14 @@ export default class AiSecretsListEditor extends Component {
             <tbody>
               {{#each @secrets.content as |secret|}}
                 <tr
+                  class="ai-secret-list__row d-table__row"
                   data-secret-id={{secret.id}}
-                  class="ai-secret-list__row d-admin-row__content"
                 >
-                  <td class="d-admin-row__overview">
+                  <td class="d-table__cell --overview">
                     <strong>{{secret.name}}</strong>
                   </td>
-                  <td class="d-admin-row__detail ai-secret-list__usage">
-                    <div class="d-admin-row__mobile-label">
+                  <td class="d-table__cell --detail ai-secret-list__usage">
+                    <div class="d-table__mobile-label">
                       {{i18n "discourse_ai.secrets.used_by"}}
                     </div>
                     {{#if secret.used_by}}
@@ -67,24 +67,44 @@ export default class AiSecretsListEditor extends Component {
                           <div class="ai-secret-list__usage-item">
                             {{#if (eq usage.type "embedding")}}
                               <LinkTo
-                                @route="adminPlugins.show.discourse-ai-embeddings.edit"
                                 @model={{usage.id}}
+                                @route="adminPlugins.show.discourse-ai-embeddings.edit"
                               >
                                 {{usage.name}}
                               </LinkTo>
                               ({{i18n "discourse_ai.secrets.embedding"}})
+                            {{else if (eq usage.type "mcp_server")}}
+                              <LinkTo
+                                @model={{usage.id}}
+                                @route="adminPlugins.show.discourse-ai-tools.mcp-server-edit"
+                              >
+                                {{usage.name}}
+                              </LinkTo>
+                              ({{i18n "discourse_ai.secrets.mcp_server"}})
+                            {{else if
+                              (eq usage.type "mcp_server_oauth_client_secret")
+                            }}
+                              <LinkTo
+                                @model={{usage.id}}
+                                @route="adminPlugins.show.discourse-ai-tools.mcp-server-edit"
+                              >
+                                {{usage.name}}
+                              </LinkTo>
+                              ({{i18n
+                                "discourse_ai.secrets.mcp_server_oauth_client_secret"
+                              }})
                             {{else if (eq usage.type "tool")}}
                               <LinkTo
-                                @route="adminPlugins.show.discourse-ai-tools.edit"
                                 @model={{usage.id}}
+                                @route="adminPlugins.show.discourse-ai-tools.edit"
                               >
                                 {{usage.name}}
                               </LinkTo>
                               ({{i18n "discourse_ai.secrets.tool"}})
                             {{else}}
                               <LinkTo
-                                @route="adminPlugins.show.discourse-ai-llms.edit"
                                 @model={{usage.id}}
+                                @route="adminPlugins.show.discourse-ai-llms.edit"
                               >
                                 {{usage.name}}
                               </LinkTo>
@@ -102,7 +122,7 @@ export default class AiSecretsListEditor extends Component {
                       </span>
                     {{/if}}
                   </td>
-                  <td class="d-admin-row__controls">
+                  <td class="d-table__cell --controls">
                     <DButton
                       class="btn btn-default btn-small ai-secret-list__edit-button"
                       @label="discourse_ai.secrets.edit"
@@ -116,9 +136,9 @@ export default class AiSecretsListEditor extends Component {
           </table>
         {{else}}
           <AdminConfigAreaEmptyList
+            @ctaClass="ai-secret-list-editor__empty-new-btn"
             @ctaLabel="discourse_ai.secrets.create_new"
             @ctaRoute="adminPlugins.show.discourse-ai-secrets.new"
-            @ctaClass="ai-secret-list-editor__empty-new-btn"
             @emptyLabel="discourse_ai.secrets.no_secrets"
           />
         {{/if}}

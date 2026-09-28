@@ -1,16 +1,15 @@
 /* eslint-disable ember/no-observers */
 import { tracked } from "@glimmer/tracking";
-import EmberObject, { computed, get, getProperties } from "@ember/object";
+import EmberObject, { computed, get, getProperties, set } from "@ember/object";
 import { dependentKeyCompat } from "@ember/object/compat";
-import { alias, equal, filterBy, gt, mapBy, or } from "@ember/object/computed";
 import Evented from "@ember/object/evented";
 import { getOwner, setOwner } from "@ember/owner";
+import { trackedArray } from "@ember/reactive/collections";
 import { cancel } from "@ember/runloop";
 import { service } from "@ember/service";
 import { camelize } from "@ember/string";
-import { htmlSafe } from "@ember/template";
+import { trustHTML } from "@ember/template";
 import { isEmpty } from "@ember/utils";
-import { TrackedArray } from "@ember-compat/tracked-built-ins";
 import { Promise } from "rsvp";
 import { ajax } from "discourse/lib/ajax";
 import {
@@ -18,14 +17,12 @@ import {
   removeValueFromArray,
   uniqueItemsFromArray,
 } from "discourse/lib/array-tools";
-import { url } from "discourse/lib/computed";
 import {
   AUTO_GROUPS,
   INTERFACE_COLOR_MODES,
   USER_OPTION_COMPOSITION_MODES,
 } from "discourse/lib/constants";
 import cookie, { removeCookie } from "discourse/lib/cookie";
-import discourseComputed from "discourse/lib/decorators";
 import deprecated from "discourse/lib/deprecated";
 import { isTesting } from "discourse/lib/environment";
 import { longDate } from "discourse/lib/formatter";
@@ -36,7 +33,11 @@ import { NotificationLevels } from "discourse/lib/notification-levels";
 import PreloadStore from "discourse/lib/preload-store";
 import singleton from "discourse/lib/singleton";
 import { emojiUnescape } from "discourse/lib/text";
-import { trackedArray } from "discourse/lib/tracked-tools";
+import { autoTrackedArray } from "discourse/lib/tracked-tools";
+import {
+  applyBehaviorTransformer,
+  applyValueTransformer,
+} from "discourse/lib/transformer";
 import { userPath } from "discourse/lib/url";
 import { defaultHomepage, escapeExpression } from "discourse/lib/utilities";
 import Badge from "discourse/models/badge";
@@ -57,6 +58,7 @@ export const SECOND_FACTOR_METHODS = {
   TOTP: 1,
   BACKUP_CODE: 2,
   SECURITY_KEY: 3,
+  PASSKEY: 4,
 };
 
 export const MAX_SECOND_FACTOR_NAME_LENGTH = 300;
@@ -124,11 +126,12 @@ let userOptionFields = [
   "email_messages_level",
   "email_previous_replies",
   "enable_allowed_pm_users",
-  "enable_defer",
   "enable_markdown_monospace_font",
   "enable_quoting",
   "enable_smart_lists",
+  "enable_upcoming_change_available_notifications",
   "external_links_in_new_tab",
+  "hidden_composer_toolbar_buttons",
   "hide_presence",
   "hide_profile",
   "homepage_id",
@@ -140,7 +143,11 @@ let userOptionFields = [
   "new_topic_duration_minutes",
   "notification_level_when_replying",
   "notify_on_linked_posts",
+  "push_notification_level",
   "seen_popups",
+  "send_shortcut",
+  "automatically_translate",
+  "show_original_content",
   "sidebar_link_to_filtered_list",
   "sidebar_show_count_of_new_items",
   "skip_new_user_tips",
@@ -148,7 +155,7 @@ let userOptionFields = [
   "theme_ids",
   "timezone",
   "title_count_mode",
-  "topics_unread_when_closed",
+  "understood_languages",
   "watched_precedence_over_muted",
 ];
 
@@ -164,7 +171,6 @@ function userOption(userOptionKey) {
         {
           id: "discourse.user.userOptions",
           since: "2.9.0.beta12",
-          dropFrom: "3.0.0.beta1",
         }
       );
 
@@ -177,7 +183,6 @@ function userOption(userOptionKey) {
         {
           id: "discourse.user.userOptions",
           since: "2.9.0.beta12",
-          dropFrom: "3.0.0.beta1",
         }
       );
 
@@ -197,8 +202,18 @@ export default class User extends RestModel.extend(Evented) {
     if (userJson) {
       userJson.isCurrent = true;
 
+      // Calling user.groups is deprecated, see discourse.user.groups,
+      // it is replaced by visibleGroups
+      if (
+        !Object.hasOwn(userJson, "visibleGroups") &&
+        Object.hasOwn(userJson, "groups")
+      ) {
+        userJson.visibleGroups = userJson.groups;
+        delete userJson.groups;
+      }
+
       if (userJson.primary_group_id) {
-        const primaryGroup = userJson.groups.find(
+        const primaryGroup = userJson.visibleGroups.find(
           (group) => group.id === userJson.primary_group_id
         );
         if (primaryGroup) {
@@ -225,12 +240,12 @@ export default class User extends RestModel.extend(Evented) {
   @tracked do_not_disturb_until;
   @tracked status;
   @tracked dismissed_banner_key;
-  @trackedArray associated_accounts;
-  @trackedArray ignored_usernames;
-  @trackedArray ignored_users;
-  @trackedArray secondary_emails;
-  @trackedArray sidebar_sections;
-  @trackedArray unconfirmed_emails;
+  @autoTrackedArray associated_accounts;
+  @autoTrackedArray ignored_usernames;
+  @autoTrackedArray ignored_users;
+  @autoTrackedArray secondary_emails;
+  @autoTrackedArray sidebar_sections;
+  @autoTrackedArray unconfirmed_emails;
 
   @userOption("mailing_list_mode") mailing_list_mode;
   @userOption("external_links_in_new_tab") external_links_in_new_tab;
@@ -243,7 +258,6 @@ export default class User extends RestModel.extend(Evented) {
   @userOption("hide_profile") hide_profile;
   @userOption("hide_presence") hide_presence;
   @userOption("title_count_mode") title_count_mode;
-  @userOption("enable_defer") enable_defer;
   @userOption("timezone") timezone;
   @userOption("skip_new_user_tips") skip_new_user_tips;
   @userOption("default_calendar") default_calendar;
@@ -255,54 +269,66 @@ export default class User extends RestModel.extend(Evented) {
   @userOption("treat_as_new_topic_start_date") treat_as_new_topic_start_date;
   @userOption("composition_mode") composition_mode;
 
-  @gt("private_messages_stats.all", 0) hasPMs;
-  @gt("private_messages_stats.mine", 0) hasStartedPMs;
-  @gt("private_messages_stats.unread", 0) hasUnreadPMs;
-  @url("id", "username_lower", "/admin/users/%@1/%@2") adminPath;
-  @equal("trust_level", 0) isBasic;
-  @equal("trust_level", 3) isRegular;
-  @equal("trust_level", 4) isLeader;
-  @or("staff", "isLeader") canManageTopic;
-  @alias("sidebar_category_ids") sidebarCategoryIds;
-  @alias("sidebar_sections") sidebarSections;
-  @mapBy("sidebarTags", "name") sidebarTagNames;
-  @filterBy("groups", "has_messages", true) groupsWithMessages;
-  @alias("can_pick_theme_with_custom_homepage") canPickThemeWithCustomHomepage;
-  @alias("can_edit_tags") canEditTags;
-
   numGroupsToDisplay = 2;
 
   statusManager = new UserStatusManager(this);
 
-  @discourseComputed("user_option.composition_mode")
-  useRichEditor(compositionMode) {
-    return compositionMode === USER_OPTION_COMPOSITION_MODES.rich;
+  @tracked _location;
+
+  @computed("sidebar_category_ids")
+  get sidebarCategoryIds() {
+    return this.sidebar_category_ids;
   }
 
-  @discourseComputed("can_be_deleted", "post_count")
-  canBeDeleted(canBeDeleted, postCount) {
-    const maxPostCount = this.siteSettings.delete_all_posts_max;
-    return canBeDeleted && postCount <= maxPostCount;
+  set sidebarCategoryIds(value) {
+    set(this, "sidebar_category_ids", value);
   }
 
-  @discourseComputed()
-  stream() {
-    return UserStream.create({ user: this });
+  @dependentKeyCompat
+  get sidebarSections() {
+    return this.sidebar_sections;
   }
 
-  @discourseComputed()
-  bookmarks() {
-    return Bookmark.create({ user: this });
+  set sidebarSections(value) {
+    this.sidebar_sections = value;
   }
 
-  @discourseComputed()
-  postsStream() {
-    return UserPostsStream.create({ user: this });
+  @dependentKeyCompat
+  get location() {
+    return applyValueTransformer("user-location", this._location, {
+      user: this,
+    });
   }
 
-  @discourseComputed()
-  userDraftsStream() {
-    return UserDraftsStream.create({ user: this });
+  set location(value) {
+    this._location = value;
+  }
+
+  @computed("can_pick_theme_with_custom_homepage")
+  get canPickThemeWithCustomHomepage() {
+    return this.can_pick_theme_with_custom_homepage;
+  }
+
+  set canPickThemeWithCustomHomepage(value) {
+    set(this, "can_pick_theme_with_custom_homepage", value);
+  }
+
+  @computed("can_edit_tags")
+  get canEditTags() {
+    return this.can_edit_tags;
+  }
+
+  set canEditTags(value) {
+    set(this, "can_edit_tags", value);
+  }
+
+  @computed("can_change_post_owner")
+  get canChangePostOwner() {
+    return this.can_change_post_owner;
+  }
+
+  set canChangePostOwner(value) {
+    set(this, "can_change_post_owner", value);
   }
 
   @computed("admin", "moderator")
@@ -312,6 +338,218 @@ export default class User extends RestModel.extend(Evented) {
 
   // prevents staff property to be overridden
   set staff(value) {}
+
+  @dependentKeyCompat
+  get mutedCategories() {
+    if (
+      this.site.lazy_load_categories &&
+      this.muted_category_ids &&
+      !Category.hasAsyncFoundAll(this.muted_category_ids)
+    ) {
+      Category.asyncFindByIds(this.muted_category_ids).then(() =>
+        this.notifyPropertyChange("muted_category_ids")
+      );
+    }
+
+    return Category.findByIds(this.get("muted_category_ids"));
+  }
+
+  set mutedCategories(categories) {
+    this.set(
+      "muted_category_ids",
+      categories.map((c) => c.id)
+    );
+  }
+
+  @dependentKeyCompat
+  get regularCategories() {
+    if (
+      this.site.lazy_load_categories &&
+      this.regular_category_ids &&
+      !Category.hasAsyncFoundAll(this.regular_category_ids)
+    ) {
+      Category.asyncFindByIds(this.regular_category_ids).then(() =>
+        this.notifyPropertyChange("regular_category_ids")
+      );
+    }
+
+    return Category.findByIds(this.get("regular_category_ids"));
+  }
+
+  set regularCategories(categories) {
+    this.set(
+      "regular_category_ids",
+      categories.map((c) => c.id)
+    );
+  }
+
+  @dependentKeyCompat
+  get trackedCategories() {
+    if (
+      this.site.lazy_load_categories &&
+      this.tracked_category_ids &&
+      !Category.hasAsyncFoundAll(this.tracked_category_ids)
+    ) {
+      Category.asyncFindByIds(this.tracked_category_ids).then(() =>
+        this.notifyPropertyChange("tracked_category_ids")
+      );
+    }
+
+    return Category.findByIds(this.get("tracked_category_ids"));
+  }
+
+  set trackedCategories(categories) {
+    this.set(
+      "tracked_category_ids",
+      categories.map((c) => c.id)
+    );
+  }
+
+  @dependentKeyCompat
+  get watchedCategories() {
+    if (
+      this.site.lazy_load_categories &&
+      this.watched_category_ids &&
+      !Category.hasAsyncFoundAll(this.watched_category_ids)
+    ) {
+      Category.asyncFindByIds(this.watched_category_ids).then(() =>
+        this.notifyPropertyChange("watched_category_ids")
+      );
+    }
+
+    return Category.findByIds(this.get("watched_category_ids"));
+  }
+
+  set watchedCategories(categories) {
+    this.set(
+      "watched_category_ids",
+      categories.map((c) => c.id)
+    );
+  }
+
+  @dependentKeyCompat
+  get watchedFirstPostCategories() {
+    if (
+      this.site.lazy_load_categories &&
+      this.watched_first_post_category_ids &&
+      !Category.hasAsyncFoundAll(this.watched_first_post_category_ids)
+    ) {
+      Category.asyncFindByIds(this.watched_first_post_category_ids).then(() =>
+        this.notifyPropertyChange("watched_first_post_category_ids")
+      );
+    }
+
+    return Category.findByIds(this.get("watched_first_post_category_ids"));
+  }
+
+  set watchedFirstPostCategories(categories) {
+    this.set(
+      "watched_first_post_category_ids",
+      categories.map((c) => c.id)
+    );
+  }
+
+  @computed("private_messages_stats.all")
+  get hasPMs() {
+    return this.private_messages_stats?.all > 0;
+  }
+
+  @computed("private_messages_stats.mine")
+  get hasStartedPMs() {
+    return this.private_messages_stats?.mine > 0;
+  }
+
+  @computed("private_messages_stats.unread")
+  get hasUnreadPMs() {
+    return this.private_messages_stats?.unread > 0;
+  }
+
+  @computed("id", "username_lower")
+  get adminPath() {
+    return getURL(`/admin/users/${this.id}/${this.username_lower}`);
+  }
+
+  @computed("trust_level")
+  get isBasic() {
+    return this.trust_level === 0;
+  }
+
+  @computed("trust_level")
+  get isRegular() {
+    return this.trust_level === 3;
+  }
+
+  @computed("trust_level")
+  get isLeader() {
+    return this.trust_level === 4;
+  }
+
+  @computed("staff", "isLeader")
+  get canManageTopic() {
+    return this.staff || this.isLeader;
+  }
+
+  @computed("can_set_topic_timer", "canManageTopic")
+  get canSetTopicTimer() {
+    return this.can_set_topic_timer ?? this.canManageTopic;
+  }
+
+  @computed("sidebarTags.@each.name")
+  get sidebarTagNames() {
+    return this.sidebarTags?.map?.((item) => item.name) ?? [];
+  }
+
+  @computed("visibleGroups.@each.has_messages")
+  get groupsWithMessages() {
+    return (
+      this.visibleGroups?.filter?.((item) => item.has_messages === true) ?? []
+    );
+  }
+
+  @computed("user_option.composition_mode")
+  get useRichEditor() {
+    return (
+      this.user_option?.composition_mode === USER_OPTION_COMPOSITION_MODES.rich
+    );
+  }
+
+  @computed("can_be_deleted", "post_count")
+  get canBeDeleted() {
+    const maxPostCount = this.siteSettings.delete_all_posts_max;
+    return this.can_be_deleted && this.post_count <= maxPostCount;
+  }
+
+  @computed()
+  get stream() {
+    return UserStream.create({ user: this });
+  }
+
+  @computed()
+  get bookmarks() {
+    return Bookmark.create({ user: this });
+  }
+
+  @computed()
+  get postsStream() {
+    return UserPostsStream.create({ user: this });
+  }
+
+  @computed()
+  get userDraftsStream() {
+    return UserDraftsStream.create({ user: this });
+  }
+
+  get groups() {
+    deprecated(
+      "Calling user.groups is deprecated, use user.visibleGroups instead, it more accurately reflects what this array of groups represents, not all of the user's group memberships may be serialized to the client. For permission checks, check the user's groups server-side and add an attribute to the User/CurrentUserSerializer, or use `resolve_group_memberships: true` for theme settings.",
+      {
+        id: "discourse.user.groups",
+        since: "2026.8.0-latest.1",
+        url: "https://meta.discourse.org/t/-/411124",
+      }
+    );
+    return this.visibleGroups;
+  }
 
   @computed("has_unseen_features")
   get hasUnseenFeatures() {
@@ -323,44 +561,49 @@ export default class User extends RestModel.extend(Evented) {
     return this.staff && this.get("has_new_upcoming_changes");
   }
 
-  destroySession() {
-    return ajax(`/session/${this.username}`, { type: "DELETE" });
-  }
-
-  @discourseComputed("username_lower")
-  searchContext(username) {
+  @computed("username_lower")
+  get searchContext() {
     return {
       type: "user",
-      id: username,
+      id: this.username_lower,
       /** @type User */
       user: this,
     };
   }
 
-  @discourseComputed("username", "name")
-  displayName(username, name) {
-    if (this.siteSettings.enable_names && !isEmpty(name)) {
-      return name;
+  @computed("username", "name")
+  get displayName() {
+    if (this.siteSettings.enable_names && !isEmpty(this.name)) {
+      return this.name;
     }
-    return username;
+    return this.username;
   }
 
-  @discourseComputed("profile_background_upload_url")
-  profileBackgroundUrl(bgUrl) {
-    if (isEmpty(bgUrl) || !this.siteSettings.allow_profile_backgrounds) {
-      return htmlSafe("");
+  @computed("profile_background_upload_url")
+  get profileBackgroundUrl() {
+    if (
+      isEmpty(this.profile_background_upload_url) ||
+      !this.siteSettings.allow_profile_backgrounds
+    ) {
+      return trustHTML("");
     }
-    return htmlSafe("background-image: url(" + getURLWithCDN(bgUrl) + ")");
+    return trustHTML(
+      "background-image: url(" +
+        getURLWithCDN(this.profile_background_upload_url) +
+        ")"
+    );
   }
 
-  @discourseComputed()
-  path() {
+  @computed()
+  get path() {
     // no need to observe, requires a hard refresh to update
-    return userPath(this.username_lower);
+    return applyValueTransformer("user-path", userPath(this.username_lower), {
+      user: this,
+    });
   }
 
-  @discourseComputed()
-  userApiKeys() {
+  @computed()
+  get userApiKeys() {
     const keys = this.user_api_keys;
     if (keys) {
       return keys.map((raw) => {
@@ -377,6 +620,243 @@ export default class User extends RestModel.extend(Evented) {
         return obj;
       });
     }
+  }
+
+  @computed()
+  get mutedTopicsPath() {
+    return defaultHomepage() === "latest"
+      ? getURL("/?state=muted")
+      : getURL("/latest?state=muted");
+  }
+
+  @computed()
+  get watchingTopicsPath() {
+    return defaultHomepage() === "latest"
+      ? getURL("/?state=watching")
+      : getURL("/latest?state=watching");
+  }
+
+  @computed()
+  get trackingTopicsPath() {
+    return defaultHomepage() === "latest"
+      ? getURL("/?state=tracking")
+      : getURL("/latest?state=tracking");
+  }
+
+  @computed("username")
+  get username_lower() {
+    return this.username.toLowerCase();
+  }
+
+  @computed("trust_level")
+  get trustLevel() {
+    return Site.currentProp("trustLevels").find(
+      (l) => l.id === parseInt(this.trust_level, 10)
+    );
+  }
+
+  @computed("previous_visit_at")
+  get previousVisitAt() {
+    return new Date(this.previous_visit_at);
+  }
+
+  @computed("suspended_till")
+  get suspended() {
+    return this.suspended_till && moment(this.suspended_till).isAfter();
+  }
+
+  @computed("suspended_till")
+  get suspendedForever() {
+    return isForever(this.suspended_till);
+  }
+
+  @computed("silenced_till")
+  get silenced() {
+    return this.silenced_till && moment(this.silenced_till).isAfter();
+  }
+
+  @computed("silenced_till")
+  get silencedForever() {
+    return isForever(this.silenced_till);
+  }
+
+  @computed("suspended_till")
+  get suspendedTillDate() {
+    return longDate(this.suspended_till);
+  }
+
+  @computed("silenced_till")
+  get silencedTillDate() {
+    return longDate(this.silenced_till);
+  }
+
+  @computed("sidebar_tags.[]")
+  get sidebarTags() {
+    if (!this.sidebar_tags || this.sidebar_tags?.length === 0) {
+      return [];
+    }
+
+    return this.sidebar_tags?.sort((a, b) => {
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  @computed("visibleGroups.[]")
+  get filteredGroups() {
+    const groups = this.visibleGroups || [];
+
+    return groups.filter((group) => {
+      return !group.automatic || group.id === AUTO_GROUPS.moderators.id;
+    });
+  }
+
+  @computed("filteredGroups", "numGroupsToDisplay")
+  get displayGroups() {
+    const groups = this.filteredGroups.slice(0, this.numGroupsToDisplay);
+    return groups.length === 0 ? null : groups;
+  }
+
+  // The user's stat count, excluding PMs.
+  @computed("statsExcludingPms.@each.count")
+  get statsCountNonPM() {
+    if (isEmpty(this.statsExcludingPms)) {
+      return 0;
+    }
+    let count = 0;
+    this.statsExcludingPms.forEach((val) => {
+      if (this.inAllStream(val)) {
+        count += val.count;
+      }
+    });
+    return count;
+  }
+
+  // The user's stats, excluding PMs.
+  @computed("stats.@each.isPM")
+  get statsExcludingPms() {
+    if (isEmpty(this.stats)) {
+      return [];
+    }
+    return this.stats.filter((stat) => !stat.isPM);
+  }
+
+  @computed("can_delete_account")
+  get canDeleteAccount() {
+    return (
+      !this.siteSettings.enable_discourse_connect && this.can_delete_account
+    );
+  }
+
+  @dependentKeyCompat
+  get sidebarLinkToFilteredList() {
+    return this.get("user_option.sidebar_link_to_filtered_list");
+  }
+
+  @dependentKeyCompat
+  get sidebarShowCountOfNewItems() {
+    return this.get("user_option.sidebar_show_count_of_new_items");
+  }
+
+  @computed("visibleGroups.@each.title", "badges.[]")
+  get availableTitles() {
+    const titles = [];
+
+    (this.visibleGroups || []).forEach((group) => {
+      if (get(group, "title")) {
+        titles.push(get(group, "title"));
+      }
+    });
+
+    (this.badges || []).forEach((badge) => {
+      if (get(badge, "allow_title")) {
+        titles.push(get(badge, "name"));
+      }
+    });
+
+    return uniqueItemsFromArray(titles)
+      .sort()
+      .map((title) => {
+        return {
+          name: escapeExpression(title),
+          id: title,
+        };
+      });
+  }
+
+  @computed("visibleGroups.[]")
+  get availableFlairs() {
+    const flairs = [];
+
+    if (this.visibleGroups) {
+      this.visibleGroups.forEach((group) => {
+        if (group.flair_url) {
+          flairs.push({
+            id: group.id,
+            name: group.name,
+            url: group.flair_url,
+            bgColor: group.flair_bg_color,
+            color: group.flair_color,
+          });
+        }
+      });
+    }
+
+    return flairs;
+  }
+
+  @computed("user_option.text_size_seq", "user_option.text_size")
+  get currentTextSize() {
+    if (cookie(TEXT_SIZE_COOKIE_NAME)) {
+      const [cookieSize, cookieSeq] = cookie(TEXT_SIZE_COOKIE_NAME).split("|");
+      if (cookieSeq >= this.user_option?.text_size_seq) {
+        return cookieSize;
+      }
+    }
+    return this.user_option?.text_size;
+  }
+
+  @computed("second_factor_enabled", "staff")
+  get enforcedSecondFactor() {
+    const enforce = this.siteSettings.enforce_second_factor;
+    return (
+      !this.second_factor_enabled &&
+      (enforce === "all" || (enforce === "staff" && this.staff))
+    );
+  }
+
+  @computed("tracked_tags.[]", "watched_tags.[]", "watching_first_post_tags.[]")
+  get trackedTags() {
+    return [
+      ...(this.tracked_tags || []),
+      ...(this.watched_tags || []),
+      ...(this.watching_first_post_tags || []),
+    ];
+  }
+
+  get prefersLightColor() {
+    return (
+      this.user_option?.interface_color_mode === INTERFACE_COLOR_MODES.LIGHT
+    );
+  }
+
+  get prefersDarkColor() {
+    return (
+      this.user_option?.interface_color_mode === INTERFACE_COLOR_MODES.DARK
+    );
+  }
+
+  get prefersAutoColor() {
+    return (
+      this.user_option?.interface_color_mode === INTERFACE_COLOR_MODES.AUTODARK
+    );
+  }
+
+  destroySession(pushSubscription) {
+    const data = {};
+    if (pushSubscription) {
+      data.push_subscription = pushSubscription;
+    }
+    return ajax(`/session/${this.username}`, { type: "DELETE", data });
   }
 
   revokeApiKey(key) {
@@ -408,92 +888,13 @@ export default class User extends RestModel.extend(Evented) {
       return userPath(`${username}/messages`);
     } else if (groups) {
       const firstAllowedGroup = groups.find((allowedGroup) =>
-        this.groups.some((userGroup) => userGroup.id === allowedGroup.id)
+        this.visibleGroups.some((userGroup) => userGroup.id === allowedGroup.id)
       );
 
       if (firstAllowedGroup) {
         return userPath(`${username}/messages/group/${firstAllowedGroup.name}`);
       }
     }
-  }
-
-  @discourseComputed()
-  mutedTopicsPath() {
-    return defaultHomepage() === "latest"
-      ? getURL("/?state=muted")
-      : getURL("/latest?state=muted");
-  }
-
-  @discourseComputed()
-  watchingTopicsPath() {
-    return defaultHomepage() === "latest"
-      ? getURL("/?state=watching")
-      : getURL("/latest?state=watching");
-  }
-
-  @discourseComputed()
-  trackingTopicsPath() {
-    return defaultHomepage() === "latest"
-      ? getURL("/?state=tracking")
-      : getURL("/latest?state=tracking");
-  }
-
-  @discourseComputed("username")
-  username_lower(username) {
-    return username.toLowerCase();
-  }
-
-  @discourseComputed("trust_level")
-  trustLevel(trustLevel) {
-    return Site.currentProp("trustLevels").find(
-      (l) => l.id === parseInt(trustLevel, 10)
-    );
-  }
-
-  @discourseComputed("previous_visit_at")
-  previousVisitAt(previous_visit_at) {
-    return new Date(previous_visit_at);
-  }
-
-  @discourseComputed("suspended_till")
-  suspended(suspendedTill) {
-    return suspendedTill && moment(suspendedTill).isAfter();
-  }
-
-  @discourseComputed("suspended_till")
-  suspendedForever(suspendedTill) {
-    return isForever(suspendedTill);
-  }
-
-  @discourseComputed("silenced_till")
-  silenced(silencedTill) {
-    return silencedTill && moment(silencedTill).isAfter();
-  }
-
-  @discourseComputed("silenced_till")
-  silencedForever(silencedTill) {
-    return isForever(silencedTill);
-  }
-
-  @discourseComputed("suspended_till")
-  suspendedTillDate(suspendedTill) {
-    return longDate(suspendedTill);
-  }
-
-  @discourseComputed("silenced_till")
-  silencedTillDate(silencedTill) {
-    return longDate(silencedTill);
-  }
-
-  @discourseComputed("sidebar_tags.[]")
-  sidebarTags(sidebarTags) {
-    if (!sidebarTags || sidebarTags.length === 0) {
-      return [];
-    }
-
-    return sidebarTags.sort((a, b) => {
-      return a.name.localeCompare(b.name);
-    });
   }
 
   changeUsername(new_username) {
@@ -787,45 +1188,6 @@ export default class User extends RestModel.extend(Evented) {
     );
   }
 
-  @discourseComputed("groups.[]")
-  filteredGroups() {
-    const groups = this.groups || [];
-
-    return groups.filter((group) => {
-      return !group.automatic || group.id === AUTO_GROUPS.moderators.id;
-    });
-  }
-
-  @discourseComputed("filteredGroups", "numGroupsToDisplay")
-  displayGroups(filteredGroups, numGroupsToDisplay) {
-    const groups = filteredGroups.slice(0, numGroupsToDisplay);
-    return groups.length === 0 ? null : groups;
-  }
-
-  // The user's stat count, excluding PMs.
-  @discourseComputed("statsExcludingPms.@each.count")
-  statsCountNonPM() {
-    if (isEmpty(this.statsExcludingPms)) {
-      return 0;
-    }
-    let count = 0;
-    this.statsExcludingPms.forEach((val) => {
-      if (this.inAllStream(val)) {
-        count += val.count;
-      }
-    });
-    return count;
-  }
-
-  // The user's stats, excluding PMs.
-  @discourseComputed("stats.@each.isPM")
-  statsExcludingPms() {
-    if (isEmpty(this.stats)) {
-      return [];
-    }
-    return this.stats.filter((stat) => !stat.isPM);
-  }
-
   findDetails(options) {
     const user = this;
 
@@ -857,16 +1219,13 @@ export default class User extends RestModel.extend(Evented) {
         );
       }
 
-      if (!isEmpty(json.user.groups) && !isEmpty(json.user.group_users)) {
-        const groups = [];
-
-        for (let i = 0; i < json.user.groups.length; i++) {
-          const group = Group.create(json.user.groups[i]);
-          group.group_user = json.user.group_users[i];
-          groups.push(group);
-        }
-
-        json.user.groups = groups;
+      if (Object.hasOwn(json.user, "groups")) {
+        json.user.visibleGroups = json.user.groups.map((groupJson, index) => {
+          const group = Group.create(groupJson);
+          group.group_user = json.user.group_users?.[index];
+          return group;
+        });
+        delete json.user.groups;
       }
 
       if (json.user.invited_by) {
@@ -887,7 +1246,16 @@ export default class User extends RestModel.extend(Evented) {
         json.user.card_badge = Badge.create(json.user.card_badge);
       }
 
+      const timezone = json.user.timezone;
+      delete json.user.timezone;
+
       user.setProperties(json.user);
+
+      if (timezone) {
+        user.user_option ||= {};
+        user.user_option.timezone = timezone;
+      }
+
       return user;
     });
   }
@@ -939,131 +1307,6 @@ export default class User extends RestModel.extend(Evented) {
       type: "POST",
       data: { email, skip_email: true, group_ids, topic_id },
     });
-  }
-
-  @dependentKeyCompat
-  get mutedCategories() {
-    if (
-      this.site.lazy_load_categories &&
-      this.muted_category_ids &&
-      !Category.hasAsyncFoundAll(this.muted_category_ids)
-    ) {
-      Category.asyncFindByIds(this.muted_category_ids).then(() =>
-        this.notifyPropertyChange("muted_category_ids")
-      );
-    }
-
-    return Category.findByIds(this.get("muted_category_ids"));
-  }
-
-  set mutedCategories(categories) {
-    this.set(
-      "muted_category_ids",
-      categories.map((c) => c.id)
-    );
-  }
-
-  @dependentKeyCompat
-  get regularCategories() {
-    if (
-      this.site.lazy_load_categories &&
-      this.regular_category_ids &&
-      !Category.hasAsyncFoundAll(this.regular_category_ids)
-    ) {
-      Category.asyncFindByIds(this.regular_category_ids).then(() =>
-        this.notifyPropertyChange("regular_category_ids")
-      );
-    }
-
-    return Category.findByIds(this.get("regular_category_ids"));
-  }
-
-  set regularCategories(categories) {
-    this.set(
-      "regular_category_ids",
-      categories.map((c) => c.id)
-    );
-  }
-
-  @dependentKeyCompat
-  get trackedCategories() {
-    if (
-      this.site.lazy_load_categories &&
-      this.tracked_category_ids &&
-      !Category.hasAsyncFoundAll(this.tracked_category_ids)
-    ) {
-      Category.asyncFindByIds(this.tracked_category_ids).then(() =>
-        this.notifyPropertyChange("tracked_category_ids")
-      );
-    }
-
-    return Category.findByIds(this.get("tracked_category_ids"));
-  }
-
-  set trackedCategories(categories) {
-    this.set(
-      "tracked_category_ids",
-      categories.map((c) => c.id)
-    );
-  }
-
-  @dependentKeyCompat
-  get watchedCategories() {
-    if (
-      this.site.lazy_load_categories &&
-      this.watched_category_ids &&
-      !Category.hasAsyncFoundAll(this.watched_category_ids)
-    ) {
-      Category.asyncFindByIds(this.watched_category_ids).then(() =>
-        this.notifyPropertyChange("watched_category_ids")
-      );
-    }
-
-    return Category.findByIds(this.get("watched_category_ids"));
-  }
-
-  set watchedCategories(categories) {
-    this.set(
-      "watched_category_ids",
-      categories.map((c) => c.id)
-    );
-  }
-
-  @dependentKeyCompat
-  get watchedFirstPostCategories() {
-    if (
-      this.site.lazy_load_categories &&
-      this.watched_first_post_category_ids &&
-      !Category.hasAsyncFoundAll(this.watched_first_post_category_ids)
-    ) {
-      Category.asyncFindByIds(this.watched_first_post_category_ids).then(() =>
-        this.notifyPropertyChange("watched_first_post_category_ids")
-      );
-    }
-
-    return Category.findByIds(this.get("watched_first_post_category_ids"));
-  }
-
-  set watchedFirstPostCategories(categories) {
-    this.set(
-      "watched_first_post_category_ids",
-      categories.map((c) => c.id)
-    );
-  }
-
-  @discourseComputed("can_delete_account")
-  canDeleteAccount(canDeleteAccount) {
-    return !this.siteSettings.enable_discourse_connect && canDeleteAccount;
-  }
-
-  @dependentKeyCompat
-  get sidebarLinkToFilteredList() {
-    return this.get("user_option.sidebar_link_to_filtered_list");
-  }
-
-  @dependentKeyCompat
-  get sidebarShowCountOfNewItems() {
-    return this.get("user_option.sidebar_show_count_of_new_items");
   }
 
   delete() {
@@ -1174,64 +1417,6 @@ export default class User extends RestModel.extend(Evented) {
     return group.get("can_admin_group") || group.get("is_group_owner");
   }
 
-  @discourseComputed("groups.@each.title", "badges.[]")
-  availableTitles() {
-    const titles = [];
-
-    (this.groups || []).forEach((group) => {
-      if (get(group, "title")) {
-        titles.push(get(group, "title"));
-      }
-    });
-
-    (this.badges || []).forEach((badge) => {
-      if (get(badge, "allow_title")) {
-        titles.push(get(badge, "name"));
-      }
-    });
-
-    return uniqueItemsFromArray(titles)
-      .sort()
-      .map((title) => {
-        return {
-          name: escapeExpression(title),
-          id: title,
-        };
-      });
-  }
-
-  @discourseComputed("groups.[]")
-  availableFlairs() {
-    const flairs = [];
-
-    if (this.groups) {
-      this.groups.forEach((group) => {
-        if (group.flair_url) {
-          flairs.push({
-            id: group.id,
-            name: group.name,
-            url: group.flair_url,
-            bgColor: group.flair_bg_color,
-            color: group.flair_color,
-          });
-        }
-      });
-    }
-
-    return flairs;
-  }
-
-  @discourseComputed("user_option.text_size_seq", "user_option.text_size")
-  currentTextSize(serverSeq, serverSize) {
-    if (cookie(TEXT_SIZE_COOKIE_NAME)) {
-      const [cookieSize, cookieSeq] = cookie(TEXT_SIZE_COOKIE_NAME).split("|");
-      if (cookieSeq >= serverSeq) {
-        return cookieSize;
-      }
-    }
-    return serverSize;
-  }
-
   updateTextSizeCookie(newSize) {
     if (newSize) {
       const seq = this.get("user_option.text_size_seq");
@@ -1244,22 +1429,12 @@ export default class User extends RestModel.extend(Evented) {
     }
   }
 
-  @discourseComputed("second_factor_enabled", "staff")
-  enforcedSecondFactor(secondFactorEnabled, staff) {
-    const enforce = this.siteSettings.enforce_second_factor;
-    return (
-      !secondFactorEnabled &&
-      (enforce === "all" || (enforce === "staff" && staff))
-    );
-  }
-
   resolvedTimezone() {
     deprecated(
       "user.resolvedTimezone() has been deprecated. Use user.user_option.timezone instead",
       {
         id: "discourse.user.resolved-timezone",
         since: "2.9.0.beta12",
-        dropFrom: "3.0.0.beta1",
       }
     );
 
@@ -1324,33 +1499,6 @@ export default class User extends RestModel.extend(Evented) {
 
     return getOwner(this).lookup("service:notifications").isInDoNotDisturb;
   }
-
-  @discourseComputed(
-    "tracked_tags.[]",
-    "watched_tags.[]",
-    "watching_first_post_tags.[]"
-  )
-  trackedTags(trackedTags, watchedTags, watchingFirstPostTags) {
-    return [...trackedTags, ...watchedTags, ...watchingFirstPostTags];
-  }
-
-  get prefersLightColor() {
-    return (
-      this.user_option?.interface_color_mode === INTERFACE_COLOR_MODES.LIGHT
-    );
-  }
-
-  get prefersDarkColor() {
-    return (
-      this.user_option?.interface_color_mode === INTERFACE_COLOR_MODES.DARK
-    );
-  }
-
-  get prefersAutoColor() {
-    return (
-      this.user_option?.interface_color_mode === INTERFACE_COLOR_MODES.AUTODARK
-    );
-  }
 }
 
 User.reopenClass({
@@ -1390,7 +1538,7 @@ User.reopenClass({
         responses.set("count", responses.get("count") + stat.get("count"));
       });
 
-    const result = new TrackedArray();
+    const result = trackedArray();
     result.push(...stats.filter((stat) => !stat.isResponse));
 
     let insertAt = 0;
@@ -1408,7 +1556,7 @@ User.reopenClass({
     return result;
   },
 
-  createAccount(attrs) {
+  async createAccount(attrs) {
     let data = {
       name: attrs.accountName,
       email: attrs.accountEmail,
@@ -1424,10 +1572,15 @@ User.reopenClass({
       data.invite_code = attrs.inviteCode;
     }
 
-    return ajax(userPath(), {
-      data,
-      type: "POST",
-    });
+    return applyBehaviorTransformer(
+      "create-account",
+      () =>
+        ajax(userPath(), {
+          data,
+          type: "POST",
+        }),
+      { data }
+    );
   },
 
   _saveTimezone(user) {
@@ -1441,6 +1594,11 @@ User.reopenClass({
   create(args) {
     args = args || {};
     this.deleteStatusTrackingFields(args);
+
+    if (Object.hasOwn(args, "groups")) {
+      args.visibleGroups = args.groups;
+      delete args.groups;
+    }
 
     return this._super(args);
   },
@@ -1571,7 +1729,7 @@ if (typeof Discourse !== "undefined") {
       if (!warned) {
         deprecated("Import the User class instead of using Discourse.User", {
           since: "2.4.0",
-          id: "discourse.globals.user",
+          id: "discourse.global.user",
         });
         warned = true;
       }

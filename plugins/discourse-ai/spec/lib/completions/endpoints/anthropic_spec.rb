@@ -173,7 +173,7 @@ RSpec.describe DiscourseAi::Completions::Endpoints::Anthropic do
   end
 
   it "can stream a response" do
-    body = (<<~STRING).strip
+    body = <<~STRING.strip
       event: message_start
       data: {"type": "message_start", "message": {"id": "msg_1nZdL29xx5MUA1yADyHTEsnR8uuvGzszyY", "type": "message", "role": "assistant", "content": [], "model": "claude-3-opus-20240229", "stop_reason": null, "stop_sequence": null, "usage": {"input_tokens": 25, "output_tokens": 1}}}
 
@@ -503,6 +503,248 @@ RSpec.describe DiscourseAi::Completions::Endpoints::Anthropic do
     expect(log.response_tokens).to eq(25)
   end
 
+  it "strips temperature and top_p when reasoning is enabled" do
+    model.update!(provider_params: { enable_reasoning: true, reasoning_tokens: 2048 })
+
+    parsed_body = nil
+    stub_request(:post, url).with(
+      body:
+        proc do |req_body|
+          parsed_body = JSON.parse(req_body, symbolize_names: true)
+          true
+        end,
+    ).to_return(
+      status: 200,
+      body: {
+        id: "msg_123",
+        type: "message",
+        role: "assistant",
+        content: [{ type: "text", text: "response" }],
+        model: "claude-3-opus-20240229",
+        usage: {
+          input_tokens: 10,
+          output_tokens: 5,
+        },
+      }.to_json,
+    )
+
+    llm.generate(prompt, user: Discourse.system_user, temperature: 0.7, top_p: 0.9)
+
+    expect(parsed_body).not_to have_key(:temperature)
+    expect(parsed_body).not_to have_key(:top_p)
+  end
+
+  it "configures adaptive thinking with effort" do
+    model.update!(
+      provider_params: {
+        enable_reasoning: true,
+        adaptive_thinking: true,
+        effort: "medium",
+      },
+    )
+
+    parsed_body = nil
+    stub_request(:post, url).with(
+      body:
+        proc do |req_body|
+          parsed_body = JSON.parse(req_body, symbolize_names: true)
+          true
+        end,
+    ).to_return(
+      status: 200,
+      body: {
+        id: "msg_123",
+        type: "message",
+        role: "assistant",
+        content: [{ type: "text", text: "response" }],
+        model: "claude-3-opus-20240229",
+        usage: {
+          input_tokens: 10,
+          output_tokens: 5,
+        },
+      }.to_json,
+    )
+
+    llm.generate(prompt, user: Discourse.system_user)
+
+    expect(parsed_body[:thinking]).to eq(type: "adaptive")
+    expect(parsed_body[:output_config]).to eq(effort: "medium")
+    expect(parsed_body[:max_tokens]).to eq(32_000)
+  end
+
+  it "uses adaptive thinking for models that only support it, with the per-call effort" do
+    model.update!(
+      name: "claude-opus-4-7",
+      provider_params: {
+        enable_reasoning: true,
+        adaptive_thinking: true,
+      },
+    )
+
+    parsed_body = nil
+    stub_request(:post, url).with(
+      body:
+        proc do |req_body|
+          parsed_body = JSON.parse(req_body, symbolize_names: true)
+          true
+        end,
+    ).to_return(
+      status: 200,
+      body: {
+        id: "msg_123",
+        type: "message",
+        role: "assistant",
+        content: [{ type: "text", text: "response" }],
+        model: "claude-opus-4-7",
+        usage: {
+          input_tokens: 10,
+          output_tokens: 5,
+        },
+      }.to_json,
+    )
+
+    llm.generate(prompt, user: Discourse.system_user, thinking_effort: "high")
+
+    expect(parsed_body[:thinking]).to eq(type: "adaptive")
+    expect(parsed_body[:output_config]).to eq(effort: "high")
+    expect(parsed_body).not_to have_key(:budget_tokens)
+  end
+
+  it "collapses minimal to low in output_config.effort for adaptive-only models, since Anthropic rejects minimal there" do
+    model.update!(
+      name: "claude-opus-4-7",
+      provider_params: {
+        enable_reasoning: true,
+        adaptive_thinking: true,
+      },
+    )
+
+    parsed_body = nil
+    stub_request(:post, url).with(
+      body:
+        proc do |req_body|
+          parsed_body = JSON.parse(req_body, symbolize_names: true)
+          true
+        end,
+    ).to_return(
+      status: 200,
+      body: {
+        id: "msg_123",
+        type: "message",
+        role: "assistant",
+        content: [{ type: "text", text: "response" }],
+        model: "claude-opus-4-7",
+        usage: {
+          input_tokens: 10,
+          output_tokens: 5,
+        },
+      }.to_json,
+    )
+
+    llm.generate(prompt, user: Discourse.system_user, thinking_effort: "minimal")
+
+    expect(parsed_body[:output_config]).to eq(effort: "low")
+  end
+
+  it "honors the adaptive_thinking custom param as an escape hatch even with an explicit thinking_effort" do
+    model.update!(provider_params: { enable_reasoning: true, adaptive_thinking: true })
+
+    parsed_body = nil
+    stub_request(:post, url).with(
+      body:
+        proc do |req_body|
+          parsed_body = JSON.parse(req_body, symbolize_names: true)
+          true
+        end,
+    ).to_return(
+      status: 200,
+      body: {
+        id: "msg_123",
+        type: "message",
+        role: "assistant",
+        content: [{ type: "text", text: "response" }],
+        model: "claude-3-opus-20240229",
+        usage: {
+          input_tokens: 10,
+          output_tokens: 5,
+        },
+      }.to_json,
+    )
+
+    llm.generate(prompt, user: Discourse.system_user, thinking_effort: "medium")
+
+    expect(parsed_body[:thinking]).to eq(type: "adaptive")
+    expect(parsed_body[:output_config]).to eq(effort: "medium")
+  end
+
+  it "lets a per-call adaptive thinking_effort win over the static effort custom param" do
+    model.update!(
+      name: "claude-opus-4-7",
+      provider_params: {
+        enable_reasoning: true,
+        adaptive_thinking: true,
+        effort: "low",
+      },
+    )
+
+    parsed_body = nil
+    stub_request(:post, url).with(
+      body:
+        proc do |req_body|
+          parsed_body = JSON.parse(req_body, symbolize_names: true)
+          true
+        end,
+    ).to_return(
+      status: 200,
+      body: {
+        id: "msg_123",
+        type: "message",
+        role: "assistant",
+        content: [{ type: "text", text: "response" }],
+        model: "claude-opus-4-7",
+        usage: {
+          input_tokens: 10,
+          output_tokens: 5,
+        },
+      }.to_json,
+    )
+
+    llm.generate(prompt, user: Discourse.system_user, thinking_effort: "xhigh")
+
+    expect(parsed_body[:output_config]).to eq(effort: "xhigh")
+  end
+
+  it "strips temperature and top_p when adaptive thinking is enabled" do
+    model.update!(provider_params: { enable_reasoning: true, adaptive_thinking: true })
+
+    parsed_body = nil
+    stub_request(:post, url).with(
+      body:
+        proc do |req_body|
+          parsed_body = JSON.parse(req_body, symbolize_names: true)
+          true
+        end,
+    ).to_return(
+      status: 200,
+      body: {
+        id: "msg_123",
+        type: "message",
+        role: "assistant",
+        content: [{ type: "text", text: "response" }],
+        model: "claude-3-opus-20240229",
+        usage: {
+          input_tokens: 10,
+          output_tokens: 5,
+        },
+      }.to_json,
+    )
+
+    llm.generate(prompt, user: Discourse.system_user, temperature: 0.7, top_p: 0.9)
+
+    expect(parsed_body).not_to have_key(:temperature)
+    expect(parsed_body).not_to have_key(:top_p)
+  end
+
   it "can operate in regular mode" do
     body = <<~STRING
       {
@@ -645,7 +887,7 @@ RSpec.describe DiscourseAi::Completions::Endpoints::Anthropic do
   end
 
   it "handles streaming with cache tokens" do
-    body = (<<~STRING).strip
+    body = <<~STRING.strip
       event: message_start
       data: {"type": "message_start", "message": {"id": "msg_1nZdL29xx5MUA1yADyHTEsnR8uuvGzszyY", "type": "message", "role": "assistant", "content": [], "model": "claude-3-opus-20240229", "stop_reason": null, "stop_sequence": null, "usage": {"input_tokens": 25, "cache_creation_input_tokens": 100, "cache_read_input_tokens": 500, "output_tokens": 1}}}
 
@@ -679,6 +921,41 @@ RSpec.describe DiscourseAi::Completions::Endpoints::Anthropic do
     expect(log.response_tokens).to eq(15)
     expect(log.cache_write_tokens).to eq(100)
     expect(log.cache_read_tokens).to eq(500)
+  end
+
+  it "discounts cached tokens in the explicit usage tracker" do
+    body = <<~STRING.strip
+      event: message_start
+      data: {"type": "message_start", "message": {"id": "msg_1", "type": "message", "role": "assistant", "content": [], "model": "claude-3-opus-20240229", "stop_reason": null, "stop_sequence": null, "usage": {"input_tokens": 1000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 800, "output_tokens": 1}}}
+
+      event: content_block_start
+      data: {"type": "content_block_start", "index":0, "content_block": {"type": "text", "text": ""}}
+
+      event: content_block_delta
+      data: {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Hello"}}
+
+      event: content_block_stop
+      data: {"type": "content_block_stop", "index": 0}
+
+      event: message_delta
+      data: {"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence":null, "usage":{"output_tokens": 50}}}
+
+      event: message_stop
+      data: {"type": "message_stop"}
+    STRING
+
+    model.update!(provider_params: { prompt_caching: "always" })
+    stub_request(:post, url).to_return(status: 200, body: body)
+
+    tracker = DiscourseAi::Completions::TokenUsageTracker.new
+    execution_context = DiscourseAi::Completions::ExecutionContext.new(token_usage_tracker: tracker)
+
+    llm.generate(prompt, user: Discourse.system_user, execution_context:) { |partial| }
+
+    # request_tokens=1000 (non-cached input), cache_read=800, cache_write=0
+    # effective request = 1000 + 0 + (800 * 0.1).to_i = 1080
+    expect(tracker.request).to eq(1080)
+    expect(tracker.response).to eq(50)
   end
 
   it "defaults to never mode and does not cache when mode is tool_results without tool results" do
@@ -875,7 +1152,7 @@ RSpec.describe DiscourseAi::Completions::Endpoints::Anthropic do
   end
 
   it "can stream a response with thinking blocks" do
-    body = (<<~STRING).strip
+    body = <<~STRING.strip
       event: message_start
       data: {"type": "message_start", "message": {"id": "msg_01...", "type": "message", "role": "assistant", "content": [], "model": "claude-3-opus-20240229", "stop_reason": null, "stop_sequence": null, "usage": {"input_tokens": 25}}}
 
@@ -994,7 +1271,7 @@ RSpec.describe DiscourseAi::Completions::Endpoints::Anthropic do
   end
 
   describe "max output tokens" do
-    it "it respects max output tokens supplied to model unconditionally, even with thinking" do
+    it "respects the model's maximum output tokens even with thinking enabled" do
       model.update!(
         provider_params: {
           enable_reasoning: true,
@@ -1032,9 +1309,89 @@ RSpec.describe DiscourseAi::Completions::Endpoints::Anthropic do
 
       llm.generate(prompt, user: Discourse.system_user, max_tokens: 2500)
       expect(parsed_body[:max_tokens]).to eq(2000)
+      expect(parsed_body[:thinking]).to eq(type: "enabled", budget_tokens: 1024)
 
       llm.generate(prompt, user: Discourse.system_user)
       expect(parsed_body[:max_tokens]).to eq(2000)
+      expect(parsed_body[:thinking]).to eq(type: "enabled", budget_tokens: 1024)
+    end
+
+    it "respects model max output tokens with adaptive thinking" do
+      model.update!(
+        provider_params: {
+          enable_reasoning: true,
+          adaptive_thinking: true,
+        },
+        max_output_tokens: 2000,
+      )
+
+      parsed_body = nil
+      stub_request(:post, url).with(
+        body:
+          proc do |req_body|
+            parsed_body = JSON.parse(req_body, symbolize_names: true)
+            true
+          end,
+        headers: {
+          "Content-Type" => "application/json",
+          "X-Api-Key" => "123",
+          "Anthropic-Version" => "2023-06-01",
+        },
+      ).to_return(
+        status: 200,
+        body: {
+          id: "msg_123",
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "test response" }],
+          model: "claude-3-opus-20240229",
+          usage: {
+            input_tokens: 10,
+            output_tokens: 5,
+          },
+        }.to_json,
+      )
+
+      llm.generate(prompt, user: Discourse.system_user)
+
+      expect(parsed_body[:thinking]).to eq(type: "adaptive")
+      expect(parsed_body[:max_tokens]).to eq(2000)
+    end
+
+    it "clamps thinking effort budget below the model max output tokens" do
+      model.update!(max_output_tokens: 8192)
+
+      parsed_body = nil
+      stub_request(:post, url).with(
+        body:
+          proc do |req_body|
+            parsed_body = JSON.parse(req_body, symbolize_names: true)
+            true
+          end,
+        headers: {
+          "Content-Type" => "application/json",
+          "X-Api-Key" => "123",
+          "Anthropic-Version" => "2023-06-01",
+        },
+      ).to_return(
+        status: 200,
+        body: {
+          id: "msg_123",
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "test response" }],
+          model: "claude-3-opus-20240229",
+          usage: {
+            input_tokens: 10,
+            output_tokens: 5,
+          },
+        }.to_json,
+      )
+
+      llm.generate(prompt, user: Discourse.system_user, thinking_effort: "high")
+
+      expect(parsed_body[:max_tokens]).to eq(8192)
+      expect(parsed_body[:thinking]).to eq(type: "enabled", budget_tokens: 7168)
     end
   end
 
@@ -1247,6 +1604,121 @@ RSpec.describe DiscourseAi::Completions::Endpoints::Anthropic do
       # Verify that tool_choice: "echo" is present
       expect(parsed_body.dig(:tool_choice, :name)).to eq("echo")
     end
+
+    it "skips tool_choice and injects guidance when thinking is enabled" do
+      model.update!(provider_params: { enable_reasoning: true, adaptive_thinking: true })
+
+      prompt =
+        DiscourseAi::Completions::Prompt.new(
+          "You are a bot",
+          messages: [type: :user, id: "user1", content: "echo hello"],
+          tools: [echo_tool],
+          tool_choice: "echo",
+        )
+
+      response_body = {
+        id: "msg_01RdJkxCbsEj9VFyFYAkfy2S",
+        type: "message",
+        role: "assistant",
+        model: "claude-3-haiku-20240307",
+        content: [
+          {
+            type: "tool_use",
+            id: "toolu_bdrk_014CMjxtGmKUtGoEFPgc7PF7",
+            name: "echo",
+            input: {
+              text: "hello",
+            },
+          },
+        ],
+        stop_reason: "end_turn",
+        stop_sequence: nil,
+        usage: {
+          input_tokens: 345,
+          output_tokens: 65,
+        },
+      }.to_json
+
+      parsed_body = nil
+      stub_request(:post, url).with(
+        body:
+          proc do |req_body|
+            parsed_body = JSON.parse(req_body, symbolize_names: true)
+            true
+          end,
+      ).to_return(status: 200, body: response_body)
+
+      llm.generate(prompt, user: Discourse.system_user)
+
+      expect(parsed_body).not_to have_key(:tool_choice)
+      last_message = parsed_body[:messages].last
+      expect(last_message[:role]).to eq("user")
+      expect(last_message[:content]).to include("'echo' tool")
+    end
+
+    it "appends guidance as a text block when last user message has array content" do
+      model.update!(provider_params: { enable_reasoning: true, adaptive_thinking: true })
+
+      prompt =
+        DiscourseAi::Completions::Prompt.new(
+          "You are a bot",
+          messages: [
+            { type: :user, id: "user1", content: "echo hello" },
+            {
+              type: :tool_call,
+              id: "call_1",
+              name: "echo",
+              content: { arguments: { text: "hello" } }.to_json,
+            },
+            { type: :tool, id: "call_1", name: "echo", content: "hello" },
+          ],
+          tools: [echo_tool],
+          tool_choice: "echo",
+        )
+
+      response_body = {
+        id: "msg_01RdJkxCbsEj9VFyFYAkfy2S",
+        type: "message",
+        role: "assistant",
+        model: "claude-3-haiku-20240307",
+        content: [
+          {
+            type: "tool_use",
+            id: "toolu_014CMjxtGmKUtGoEFPgc7PF7",
+            name: "echo",
+            input: {
+              text: "hello again",
+            },
+          },
+        ],
+        stop_reason: "end_turn",
+        stop_sequence: nil,
+        usage: {
+          input_tokens: 345,
+          output_tokens: 65,
+        },
+      }.to_json
+
+      parsed_body = nil
+      stub_request(:post, url).with(
+        body:
+          proc do |req_body|
+            parsed_body = JSON.parse(req_body, symbolize_names: true)
+            true
+          end,
+      ).to_return(status: 200, body: response_body)
+
+      llm.generate(prompt, user: Discourse.system_user)
+
+      expect(parsed_body).not_to have_key(:tool_choice)
+      last_message = parsed_body[:messages].last
+      expect(last_message[:role]).to eq("user")
+      expect(last_message[:content]).to be_an(Array)
+      expect(last_message[:content].first[:type]).to eq("tool_result")
+      guidance_block = last_message[:content].last
+      expect(guidance_block[:type]).to eq("text")
+      expect(guidance_block[:text]).to include("'echo' tool")
+    end
   end
 
   describe "structured output via output_config" do
@@ -1269,7 +1741,7 @@ RSpec.describe DiscourseAi::Completions::Endpoints::Anthropic do
         },
       }
 
-      body = (<<~STRING).strip
+      body = <<~STRING.strip
       event: message_start
       data: {"type": "message_start", "message": {"id": "msg_1nZdL29xx5MUA1yADyHTEsnR8uuvGzszyY", "type": "message", "role": "assistant", "content": [], "model": "claude-3-opus-20240229", "stop_reason": null, "stop_sequence": null, "usage": {"input_tokens": 25, "output_tokens": 1}}}
 
@@ -1382,7 +1854,7 @@ RSpec.describe DiscourseAi::Completions::Endpoints::Anthropic do
         },
       }
 
-      body = (<<~STRING).strip
+      body = <<~STRING.strip
       event: message_start
       data: {"type": "message_start", "message": {"id": "msg_1nZdL29xx5MUA1yADyHTEsnR8uuvGzszyY", "type": "message", "role": "assistant", "content": [], "model": "claude-3-opus-20240229", "stop_reason": null, "stop_sequence": null, "usage": {"input_tokens": 25, "output_tokens": 1}}}
 
@@ -1433,7 +1905,148 @@ RSpec.describe DiscourseAi::Completions::Endpoints::Anthropic do
     end
   end
 
+  describe "adaptive thinking" do
+    it "sends adaptive thinking config when enabled" do
+      model.update!(provider_params: { enable_reasoning: true, adaptive_thinking: true })
+
+      parsed_body = nil
+      stub_request(:post, url).with(
+        body:
+          proc do |req_body|
+            parsed_body = JSON.parse(req_body, symbolize_names: true)
+            true
+          end,
+        headers: {
+          "Content-Type" => "application/json",
+          "X-Api-Key" => "123",
+          "Anthropic-Version" => "2023-06-01",
+        },
+      ).to_return(
+        status: 200,
+        body: {
+          id: "msg_123",
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "test response" }],
+          model: "claude-3-opus-20240229",
+          usage: {
+            input_tokens: 10,
+            output_tokens: 5,
+          },
+        }.to_json,
+      )
+
+      llm.generate(prompt, user: Discourse.system_user)
+      expect(parsed_body[:thinking]).to eq({ type: "adaptive" })
+      expect(parsed_body[:max_tokens]).to eq(32_000)
+    end
+
+    it "adaptive_thinking takes priority over enable_reasoning" do
+      model.update!(
+        provider_params: {
+          adaptive_thinking: true,
+          enable_reasoning: true,
+          reasoning_tokens: 10_000,
+        },
+      )
+
+      parsed_body = nil
+      stub_request(:post, url).with(
+        body:
+          proc do |req_body|
+            parsed_body = JSON.parse(req_body, symbolize_names: true)
+            true
+          end,
+      ).to_return(
+        status: 200,
+        body: {
+          id: "msg_123",
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "test response" }],
+          model: "claude-3-opus-20240229",
+          usage: {
+            input_tokens: 10,
+            output_tokens: 5,
+          },
+        }.to_json,
+      )
+
+      llm.generate(prompt, user: Discourse.system_user)
+      expect(parsed_body[:thinking]).to eq({ type: "adaptive" })
+      expect(parsed_body[:max_tokens]).to eq(32_000)
+    end
+  end
+
   describe "effort parameter" do
+    it "includes effort in output_config when set to max" do
+      model.update!(provider_params: { effort: "max" })
+
+      parsed_body = nil
+      stub_request(:post, url).with(
+        body:
+          proc do |req_body|
+            parsed_body = JSON.parse(req_body, symbolize_names: true)
+            true
+          end,
+        headers: {
+          "Content-Type" => "application/json",
+          "X-Api-Key" => "123",
+          "Anthropic-Version" => "2023-06-01",
+        },
+      ).to_return(
+        status: 200,
+        body: {
+          id: "msg_123",
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "test response" }],
+          model: "claude-3-opus-20240229",
+          usage: {
+            input_tokens: 10,
+            output_tokens: 5,
+          },
+        }.to_json,
+      )
+
+      llm.generate(prompt, user: Discourse.system_user)
+      expect(parsed_body.dig(:output_config, :effort)).to eq("max")
+    end
+
+    it "includes effort in output_config when set to xhigh" do
+      model.update!(provider_params: { effort: "xhigh" })
+
+      parsed_body = nil
+      stub_request(:post, url).with(
+        body:
+          proc do |req_body|
+            parsed_body = JSON.parse(req_body, symbolize_names: true)
+            true
+          end,
+        headers: {
+          "Content-Type" => "application/json",
+          "X-Api-Key" => "123",
+          "Anthropic-Version" => "2023-06-01",
+        },
+      ).to_return(
+        status: 200,
+        body: {
+          id: "msg_123",
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "test response" }],
+          model: "claude-3-opus-20240229",
+          usage: {
+            input_tokens: 10,
+            output_tokens: 5,
+          },
+        }.to_json,
+      )
+
+      llm.generate(prompt, user: Discourse.system_user)
+      expect(parsed_body.dig(:output_config, :effort)).to eq("xhigh")
+    end
+
     it "includes effort in output_config when set to low, medium, or high" do
       model.update!(provider_params: { effort: "high" })
 
@@ -1589,7 +2202,7 @@ RSpec.describe DiscourseAi::Completions::Endpoints::Anthropic do
         },
       }
 
-      body = (<<~STRING).strip
+      body = <<~STRING.strip
       event: message_start
       data: {"type": "message_start", "message": {"id": "msg_123", "type": "message", "role": "assistant", "content": [], "model": "claude-3-opus-20240229", "stop_reason": null, "stop_sequence": null, "usage": {"input_tokens": 25, "output_tokens": 1}}}
 

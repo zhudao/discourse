@@ -1,12 +1,19 @@
 /* eslint-disable ember/no-classic-components, ember/require-tagless-components */
 import Component from "@ember/component";
 import { hash } from "@ember/helper";
-import { action } from "@ember/object";
-import discourseComputed from "discourse/lib/decorators";
+import { action, computed } from "@ember/object";
 import EmailGroupUserChooser from "discourse/select-kit/components/email-group-user-chooser";
 
 export default class ComposerUserSelector extends Component {
   _groups = [];
+
+  @computed("recipients")
+  get splitRecipients() {
+    if (Array.isArray(this.recipients)) {
+      return this.recipients;
+    }
+    return this.recipients ? this.recipients.split(",").filter(Boolean) : [];
+  }
 
   didInsertElement() {
     super.didInsertElement(...arguments);
@@ -16,12 +23,13 @@ export default class ComposerUserSelector extends Component {
     }
   }
 
-  @discourseComputed("recipients")
-  splitRecipients(recipients) {
-    if (Array.isArray(recipients)) {
-      return recipients;
-    }
-    return recipients ? recipients.split(",").filter(Boolean) : [];
+  @action
+  updateRecipients(selected, content) {
+    const newGroups = content
+      .filter((group) => group.isGroup)
+      .map((item) => item.id);
+    this._updateGroups(selected, newGroups);
+    this.set("recipients", selected.join(","));
   }
 
   _updateGroups(selected, newGroups) {
@@ -40,19 +48,9 @@ export default class ComposerUserSelector extends Component {
     });
   }
 
-  @action
-  updateRecipients(selected, content) {
-    const newGroups = content
-      .filter((group) => group.isGroup)
-      .map((item) => item.id);
-    this._updateGroups(selected, newGroups);
-    this.set("recipients", selected.join(","));
-  }
-
   <template>
     <EmailGroupUserChooser
       @id="private-message-users"
-      @value={{this.splitRecipients}}
       @onChange={{this.updateRecipients}}
       @options={{hash
         topicId=this.topicId
@@ -61,6 +59,7 @@ export default class ComposerUserSelector extends Component {
         allowEmails=this.currentUser.can_send_private_email_messages
         autoWrap=true
       }}
+      @value={{this.splitRecipients}}
     />
   </template>
 }

@@ -1,3 +1,5 @@
+import domFromString from "discourse/lib/dom-from-string";
+import discourseLater from "discourse/lib/later";
 import {
   failedCache,
   lookupCache,
@@ -6,9 +8,7 @@ import {
   resetLocalCache,
   setFailedCache,
   setLocalCache,
-} from "pretty-text/oneboxer-cache";
-import domFromString from "discourse/lib/dom-from-string";
-import discourseLater from "discourse/lib/later";
+} from "./oneboxer-cache";
 
 let timeout;
 const loadingQueue = [];
@@ -87,9 +87,17 @@ function loadNext(ajax) {
         if (result?.jqXHR?.status === 429) {
           timeoutMs = 2000;
           removeLoading = false;
-          loadingQueue.unshift({ url, refresh, elem, categoryId, topicId });
+          loadingQueue.unshift({
+            url,
+            refresh,
+            elem,
+            categoryId,
+            topicId,
+            onResolve,
+          });
         } else {
           setFailedCache(normalize(url), true);
+          onResolve?.(null);
         }
       }
     )

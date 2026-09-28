@@ -30,7 +30,6 @@ module Chat
     #   @option params [String,nil] :description
     #   @option params [String,nil] :slug
     #   @option params [String,nil] :emoji
-    #   @option params [Integer,nil] :icon_upload_id
     #   @option params [Boolean] :threading_enabled
     #   @option params [Boolean] :auto_join_users Only valid for {CategoryChannel}. Whether active users with permission to see the category should automatically join the channel.
     #   @option params [Boolean] :allow_channel_wide_mentions Allow the use of @here and @all in the channel.
@@ -77,6 +76,7 @@ module Chat
     end
 
     def mark_all_threads_as_read_if_needed(channel:)
+      return if !channel.category_channel?
       return unless channel.threading_enabled_previously_changed?(to: true)
       Jobs.enqueue(Jobs::Chat::MarkAllChannelThreadsRead, channel_id: channel.id)
     end

@@ -5,7 +5,7 @@ import { afterRender } from "discourse/lib/decorators";
 import {
   buildArgsWithDeprecations,
   deprecatedArgumentValue,
-} from "discourse/lib/plugin-connectors";
+} from "discourse/lib/outlet-args";
 
 let _decorators = {};
 
@@ -81,13 +81,6 @@ export default class PluginConnector extends Component {
     this._decoratePluginOutlets();
   }
 
-  @afterRender
-  _decoratePluginOutlets() {
-    (_decorators[this.connector.outletName] || []).forEach((dec) =>
-      dec(this.element, this.args)
-    );
-  }
-
   willDestroyElement() {
     super.willDestroyElement(...arguments);
 
@@ -99,5 +92,12 @@ export default class PluginConnector extends Component {
     const connectorClass = this.connector.connectorClass;
     const action = connectorClass?.actions?.[name];
     return action ? action.call(this, ...args) : super.send(name, ...args);
+  }
+
+  @afterRender
+  _decoratePluginOutlets() {
+    (_decorators[this.connector.outletName] || []).forEach((dec) =>
+      dec(this.element, this.args)
+    );
   }
 }

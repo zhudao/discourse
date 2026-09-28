@@ -18,6 +18,13 @@ body {
   @include viewport.until(sm) {
     background-color: var(--d-content-background);
   }
+
+  @include viewport.from(lg) {
+    &.account-created-page,
+    &.activate-account-page {
+      background: var(--background-color);
+    }
+  }
 }
 
 #main-outlet-wrapper {
@@ -88,7 +95,11 @@ body:not(.has-full-page-chat, .wizard) {
       }
 
       @include viewport.from(sm) {
-        > *:not(.experimental-screen, .activate-account) {
+        > *:not(
+            .experimental-screen,
+            .activate-account,
+            .discourse-boards-board-viewer
+          ) {
           box-sizing: border-box;
           max-width: 1000px;
           margin-inline: auto;
@@ -97,6 +108,11 @@ body:not(.has-full-page-chat, .wizard) {
       }
     }
   }
+}
+
+body.has-admin-changes-banner #main-outlet-wrapper #main-outlet {
+  // makes space so save banner doesn't overlap content
+  padding-bottom: 6em;
 }
 
 @include viewport.until(sm) {
@@ -115,15 +131,16 @@ aside.onebox {
   background-color: var(--d-content-background);
 }
 
-.d-editor-preview-wrapper {
-  border-radius: var(--d-border-radius);
-  padding: 1em;
-  background-color: var(--d-content-background);
-}
-
 .no-ember {
   #main-outlet {
     border-radius: var(--d-border-radius-large);
     max-height: calc(100vh - 50px - 1em - var(--main-grid-gap));
+  }
+}
+
+.activate-account {
+  .activate-account-button,
+  .continue-button {
+    margin-inline: 0;
   }
 }

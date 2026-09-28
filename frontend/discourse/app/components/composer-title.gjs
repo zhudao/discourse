@@ -1,29 +1,97 @@
 /* eslint-disable ember/no-classic-components, ember/no-observers, ember/require-tagless-components */
 import Component from "@ember/component";
-import EmberObject from "@ember/object";
-import { alias, or } from "@ember/object/computed";
+import EmberObject, { computed, set } from "@ember/object";
 import { next, schedule } from "@ember/runloop";
 import { classNames } from "@ember-decorators/component";
 import { observes } from "@ember-decorators/object";
 import { load } from "pretty-text/oneboxer";
 import { lookupCache } from "pretty-text/oneboxer-cache";
 import PluginOutlet from "discourse/components/plugin-outlet";
-import PopupInputTip from "discourse/components/popup-input-tip";
-import TextField from "discourse/components/text-field";
 import lazyHash from "discourse/helpers/lazy-hash";
 import { ajax } from "discourse/lib/ajax";
 import discourseDebounce from "discourse/lib/debounce";
-import discourseComputed from "discourse/lib/decorators";
 import { isTesting } from "discourse/lib/environment";
 import putCursorAtEnd from "discourse/lib/put-cursor-at-end";
+import DPopupInputTip from "discourse/ui-kit/d-popup-input-tip";
+import DTextField from "discourse/ui-kit/d-text-field";
 import { i18n } from "discourse-i18n";
 
 @classNames("title-input")
 export default class ComposerTitle extends Component {
-  @alias("composer.canEditTopicFeaturedLink") watchForLink;
-  @or("composer.loading", "composer.disableTitleInput") disabled;
-
   isTitleFocused = false;
+
+  @computed("composer.canEditTopicFeaturedLink")
+  get watchForLink() {
+    return this.composer?.canEditTopicFeaturedLink;
+  }
+
+  set watchForLink(value) {
+    set(this, "composer.canEditTopicFeaturedLink", value);
+  }
+
+  @computed("composer.loading", "composer.disableTitleInput")
+  get disabled() {
+    return this.composer?.loading || this.composer?.disableTitleInput;
+  }
+
+  @computed(
+    "composer.titleLength",
+    "composer.missingTitleCharacters",
+    "composer.minimumTitleLength",
+    "lastValidatedAt",
+    "isTitleFocused"
+  )
+  get validation() {
+    let reason;
+    if (this.isTitleFocused) {
+      return;
+    }
+    if (this.composer?.titleLength < 1) {
+      reason = i18n("composer.error.title_missing");
+    } else if (this.composer?.missingTitleCharacters > 0) {
+      reason = i18n("composer.error.title_too_short", {
+        count: this.composer?.minimumTitleLength,
+      });
+    } else if (
+      this.composer?.titleLength > this.siteSettings.max_topic_title_length
+    ) {
+      reason = i18n("composer.error.title_too_long", {
+        count: this.siteSettings.max_topic_title_length,
+      });
+    }
+
+    if (reason) {
+      return EmberObject.create({
+        failed: true,
+        reason,
+        lastShownAt: this.lastValidatedAt,
+      });
+    }
+  }
+
+  @computed("watchForLink")
+  get titleMaxLength() {
+    // maxLength gets in the way of pasting long links, so don't use it if featured links are allowed.
+    // Validation will display a message if titles are too long.
+    return this.watchForLink ? null : this.siteSettings.max_topic_title_length;
+  }
+
+  @computed("composer.title", "composer.titleLength")
+  get isAbsoluteUrl() {
+    return (
+      this.composer?.titleLength > 0 &&
+      /^(https?:)?\/\/[\w\.\-]+/i.test(this.composer?.title) &&
+      !/\s/.test(this.composer?.title)
+    );
+  }
+
+  @computed("composer.categoryTitlePlaceholder", "composer.titlePlaceholder")
+  get titleAriaLabel() {
+    return (
+      this.composer.categoryTitlePlaceholder ||
+      i18n(this.composer.titlePlaceholder)
+    );
+  }
 
   didInsertElement() {
     super.didInsertElement(...arguments);
@@ -54,50 +122,18 @@ export default class ComposerTitle extends Component {
     }
   }
 
-  @discourseComputed(
-    "composer.titleLength",
-    "composer.missingTitleCharacters",
-    "composer.minimumTitleLength",
-    "lastValidatedAt",
-    "isTitleFocused"
-  )
-  validation(
-    titleLength,
-    missingTitleChars,
-    minimumTitleLength,
-    lastValidatedAt,
-    isTitleFocused
-  ) {
-    let reason;
-    if (isTitleFocused) {
-      return;
-    }
-    if (titleLength < 1) {
-      reason = i18n("composer.error.title_missing");
-    } else if (missingTitleChars > 0) {
-      reason = i18n("composer.error.title_too_short", {
-        count: minimumTitleLength,
-      });
-    } else if (titleLength > this.siteSettings.max_topic_title_length) {
-      reason = i18n("composer.error.title_too_long", {
-        count: this.siteSettings.max_topic_title_length,
-      });
-    }
-
-    if (reason) {
-      return EmberObject.create({
-        failed: true,
-        reason,
-        lastShownAt: lastValidatedAt,
-      });
+  changeTitle(val) {
+    if (val && val.length > 0) {
+      this.set("composer.title", val.trim());
     }
   }
 
-  @discourseComputed("watchForLink")
-  titleMaxLength(watchForLink) {
-    // maxLength gets in the way of pasting long links, so don't use it if featured links are allowed.
-    // Validation will display a message if titles are too long.
-    return watchForLink ? null : this.siteSettings.max_topic_title_length;
+  bodyIsDefault() {
+    const reply = this.get("composer.reply") || "";
+    return (
+      reply.length === 0 ||
+      reply === (this.get("composer.category.topic_template") || "")
+    );
   }
 
   @observes("composer.titleLength", "watchForLink")
@@ -128,54 +164,56 @@ export default class ComposerTitle extends Component {
   }
 
   _checkForUrl() {
-    if (!this.element || this.isDestroying || this.isDestroyed) {
+    if (!this.element || this.isDestroying) {
       return;
     }
 
-    if (this.isAbsoluteUrl && this.bodyIsDefault()) {
-      // only feature links to external sites
-      if (
-        this.get("composer.title").match(
-          new RegExp("^https?:\\/\\/" + window.location.hostname, "i")
-        )
-      ) {
-        return;
-      }
+    if (!this.isAbsoluteUrl) {
+      return;
+    }
 
-      // Try to onebox. If success, update post body and title.
-      this.set("composer.loading", true);
+    // only feature links to external sites
+    if (
+      this.get("composer.title").match(
+        new RegExp("^https?:\\/\\/" + window.location.hostname, "i")
+      )
+    ) {
+      return;
+    }
 
-      const link = document.createElement("a");
-      link.href = this.get("composer.title");
+    // Try to onebox. If success, update post body and title.
+    this.set("composer.loading", true);
 
-      const loadOnebox = load({
-        elem: link,
-        refresh: false,
-        ajax,
-        synchronous: true,
-        categoryId: this.get("composer.category.id"),
-        topicId: this.get("composer.topic.id"),
-      });
+    const link = document.createElement("a");
+    link.href = this.get("composer.title");
 
-      if (loadOnebox && loadOnebox.then) {
-        loadOnebox
-          .then(() => {
-            const v = lookupCache(this.get("composer.title"));
-            this._updatePost(v ? v : link);
-          })
-          .finally(() => {
-            this.set("composer.loading", false);
-            schedule("afterRender", () => {
-              putCursorAtEnd(this.element.querySelector("input"));
-            });
+    const loadOnebox = load({
+      elem: link,
+      refresh: false,
+      ajax,
+      synchronous: true,
+      categoryId: this.get("composer.category.id"),
+      topicId: this.get("composer.topic.id"),
+    });
+
+    if (loadOnebox && loadOnebox.then) {
+      loadOnebox
+        .then(() => {
+          const v = lookupCache(this.get("composer.title"));
+          this._updatePost(v ? v : link);
+        })
+        .finally(() => {
+          this.set("composer.loading", false);
+          schedule("afterRender", () => {
+            putCursorAtEnd(this.element.querySelector("input"));
           });
-      } else {
-        this._updatePost(loadOnebox);
-        this.set("composer.loading", false);
-        schedule("afterRender", () => {
-          putCursorAtEnd(this.element.querySelector("input"));
         });
-      }
+    } else {
+      this._updatePost(loadOnebox);
+      this.set("composer.loading", false);
+      schedule("afterRender", () => {
+        putCursorAtEnd(this.element.querySelector("input"));
+      });
     }
   }
 
@@ -217,46 +255,24 @@ export default class ComposerTitle extends Component {
     }
   }
 
-  changeTitle(val) {
-    if (val && val.length > 0) {
-      this.set("composer.title", val.trim());
-    }
-  }
-
-  @discourseComputed("composer.title", "composer.titleLength")
-  isAbsoluteUrl(title, titleLength) {
-    return (
-      titleLength > 0 &&
-      /^(https?:)?\/\/[\w\.\-]+/i.test(title) &&
-      !/\s/.test(title)
-    );
-  }
-
-  bodyIsDefault() {
-    const reply = this.get("composer.reply") || "";
-    return (
-      reply.length === 0 ||
-      reply === (this.get("composer.category.topic_template") || "")
-    );
-  }
-
   <template>
-    <TextField
-      @value={{this.composer.title}}
+    <DTextField
+      @aria-label={{this.titleAriaLabel}}
+      @autocomplete="off"
+      @disabled={{this.disabled}}
       @id="reply-title"
       @maxLength={{this.titleMaxLength}}
+      @placeholder={{this.composer.categoryTitlePlaceholder}}
       @placeholderKey={{this.composer.titlePlaceholder}}
-      @aria-label={{i18n this.composer.titlePlaceholder}}
-      @disabled={{this.disabled}}
-      @autocomplete="off"
+      @value={{this.composer.title}}
     />
 
     <PluginOutlet
-      @name="after-composer-title-input"
       @connectorTagName="div"
+      @name="after-composer-title-input"
       @outletArgs={{lazyHash composer=this.composer}}
     />
 
-    <PopupInputTip @validation={{this.validation}} />
+    <DPopupInputTip @validation={{this.validation}} />
   </template>
 }

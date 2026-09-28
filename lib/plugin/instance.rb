@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../navigation_destination"
+
 require "digest/sha1"
 require "fileutils"
 require "plugin/metadata"
@@ -71,6 +73,15 @@ class Plugin::Instance
     File.dirname(path)
   end
 
+  def resolved_dir
+    @resolved_dir ||=
+      if File.symlink?(root_dir)
+        File.expand_path(File.readlink(root_dir), "#{Rails.root.join("plugins")}")
+      else
+        root_dir
+      end
+  end
+
   def seed_data
     @seed_data ||= ActiveSupport::HashWithIndifferentAccess.new({})
   end
@@ -85,16 +96,20 @@ class Plugin::Instance
   end
 
   def self.find_all(parent_path)
+    allowed = GlobalSetting.plugins_to_load
     [].tap do |plugins|
       # also follows symlinks - http://stackoverflow.com/q/357754
-      Dir["#{parent_path}/*/plugin.rb"].sort.each { |path| plugins << parse_from_source(path) }
+      Dir["#{parent_path}/*/plugin.rb"].sort.each do |path|
+        next if allowed && !allowed.include?(File.basename(File.dirname(path)))
+        plugins << parse_from_source(path)
+      end
     end
   end
 
   def self.parse_from_source(path)
     source = File.read(path)
     metadata = Plugin::Metadata.parse(source)
-    self.new(metadata, path)
+    new(metadata, path)
   end
 
   def initialize(metadata = nil, path = nil)
@@ -125,7 +140,7 @@ class Plugin::Instance
   end
 
   def full_admin_route
-    route = self.admin_route
+    route = admin_route
 
     if route.blank?
       return if !any_settings? || has_only_enabled_setting?
@@ -149,7 +164,7 @@ class Plugin::Instance
   end
 
   def plugin_settings
-    @plugin_settings ||= SiteSetting.plugins.select { |_, plugin_name| plugin_name == self.name }
+    @plugin_settings ||= SiteSetting.plugins.select { |_, plugin_name| plugin_name == name }
   end
 
   def deprecate_setting(old_setting, new_setting, override, drom_from)
@@ -174,7 +189,7 @@ class Plugin::Instance
   delegate :name, to: :metadata
 
   def humanized_name
-    (setting_category_name || name).sub(/\Adiscourse[\s-]+/i, "").gsub("-", " ").upcase_first
+    (setting_category_name || name).sub(/\Adiscourse[\s\-_]+/i, "").tr("-_", "  ").upcase_first
   end
 
   def add_to_serializer(
@@ -230,9 +245,17 @@ class Plugin::Instance
     DiscoursePluginRegistry.register_modifier(self, modifier_name, &blk)
   end
 
+  # Register a handler for an action initiated by an anonymous user, to be
+  # replayed against their account after they authenticate. See AnonymousAction.
+  def register_anonymous_action(type, &block)
+    reloadable_patch { AnonymousAction.register(type, &block) }
+  end
+
   # Applies to all sites in a multisite environment. Ignores plugin.enabled?
-  def add_report(name, &block)
-    reloadable_patch { |plugin| Report.add_report(name, &block) }
+  def add_report(name, exclude_from_dashboard: false, admin_only_related_items: false, &block)
+    reloadable_patch do |plugin|
+      Report.add_report(name, exclude_from_dashboard:, admin_only_related_items:, &block)
+    end
   end
 
   # Applies to all sites in a multisite environment. Ignores plugin.enabled?
@@ -400,8 +423,36 @@ class Plugin::Instance
     reloadable_patch { Site.preloaded_category_custom_fields << field }
   end
 
+  def register_category_type(klass)
+    Categories::TypeRegistry.register(klass, plugin_identifier: metadata.name)
+  end
+
   def register_problem_check(klass)
     DiscoursePluginRegistry.register_problem_check(klass, self)
+  end
+
+  # Title and description are server translation keys. Paths omit the installation
+  # base path; availability is evaluated for the requesting Guardian on each lookup.
+  def register_navigation_destination(id, path:, title:, description:, keywords: [], &available)
+    destination =
+      NavigationDestination.new(
+        id: "#{name}:#{id}",
+        path: path,
+        title: title,
+        description: description,
+        keywords: keywords,
+        &available
+      )
+    DiscoursePluginRegistry.register_navigation_destination(destination, self)
+  end
+
+  def register_upcoming_change_conditional_display(setting_name, &block)
+    raise ArgumentError, "block is required" if block.blank?
+
+    DiscoursePluginRegistry.register_upcoming_change_conditional_display_callback(
+      { setting_name: setting_name.to_sym, callback: block },
+      self,
+    )
   end
 
   def custom_avatar_column(column)
@@ -619,13 +670,18 @@ class Plugin::Instance
     "#{git_repo.url}/commit/#{commit_hash}"
   end
 
+  def preinstalled?
+    return @preinstalled if defined?(@preinstalled)
+    @preinstalled = !File.exist?(File.join(directory, ".git"))
+  end
+
   def git_repo
     @git_repo ||= GitRepo.new(directory, name)
   end
 
   def discourse_owned?
     return false if commit_hash.blank?
-    parsed_commit_url = UrlHelper.relaxed_parse(self.commit_url)
+    parsed_commit_url = UrlHelper.relaxed_parse(commit_url)
     return false if parsed_commit_url.blank? || parsed_commit_url.path.blank?
     github_org = parsed_commit_url.path.split("/")[1]
     (github_org == "discourse" || github_org == "discourse-org") &&
@@ -655,14 +711,12 @@ class Plugin::Instance
 
   def notify_after_initialize
     initializers.each do |callback|
-      begin
-        callback.call(self)
-      rescue ActiveRecord::StatementInvalid => e
-        # When running `db:migrate` for the first time on a new database,
-        # plugin initializers might try to use models.
-        # Tolerate it.
-        raise e unless e.message.try(:include?, "PG::UndefinedTable")
-      end
+      callback.call(self)
+    rescue ActiveRecord::StatementInvalid => e
+      # When running `db:migrate` for the first time on a new database,
+      # plugin initializers might try to use models.
+      # Tolerate it.
+      raise e unless e.message.try(:include?, "PG::UndefinedTable")
     end
   end
 
@@ -711,8 +765,8 @@ class Plugin::Instance
   end
 
   def listen_for(event_name)
-    return unless self.respond_to?(event_name)
-    DiscourseEvent.on(event_name, &self.method(event_name))
+    return unless respond_to?(event_name)
+    DiscourseEvent.on(event_name, &method(event_name))
   end
 
   def register_css(style)
@@ -725,6 +779,17 @@ class Plugin::Instance
 
   def register_svg_icon(icon)
     DiscoursePluginRegistry.register_svg_icon(icon)
+  end
+
+  # Registers a block returning icon names to include in the SVG sprite. Use this
+  # instead of `register_svg_icon` when the names are only known at runtime, such
+  # as when they are chosen by admins and stored in the database. The block is
+  # called while the sprite is built, so it must not run at boot, and its result
+  # is scoped to the current site.
+  #
+  # Call `SvgSprite.expire_cache` when the underlying data changes.
+  def register_svg_icon_source(&block)
+    DiscoursePluginRegistry.register_svg_icon_source(block, self)
   end
 
   def extend_content_security_policy(extension)
@@ -768,10 +833,12 @@ class Plugin::Instance
         Any hbs files under `assets/javascripts` will be automatically compiled and included."
       ERROR
 
-    raise <<~ERROR if file.start_with?("javascripts/") && file.end_with?(".js", ".js.es6")
+    if file.start_with?("javascripts/") && file.end_with?(".js", ".js.es6", ".ts", ".gts")
+      raise <<~ERROR
         [#{name}] Javascript files under `assets/javascripts` are automatically included in JS bundles.
         Manual register_asset calls should be removed. (attempted to add #{file})
       ERROR
+    end
 
     if opts && opts == :vendored_core_pretty_text
       full_path = DiscoursePluginRegistry.core_asset_for_name(file)
@@ -825,7 +892,7 @@ class Plugin::Instance
   # this allows us to present information about a plugin in the UI
   # prior to activations
   def activate!
-    self.instance_eval File.read(path), path
+    instance_eval File.read(path), path
     if auto_assets = generate_automatic_assets!
       assets.concat(auto_assets)
     end
@@ -851,7 +918,7 @@ class Plugin::Instance
     if Dir.exist?(public_data)
       target = Rails.root.to_s + "/public/plugins/"
 
-      Discourse::Utils.execute_command("mkdir", "-p", target)
+      FileUtils.mkdir_p(target)
       target << name.gsub(/\s/, "_")
 
       Discourse::Utils.atomic_ln_s(public_data, target)
@@ -954,8 +1021,7 @@ class Plugin::Instance
   end
 
   def js_asset_exists?
-    # If assets/javascripts exists, ember-cli will output a .js file
-    File.exist?("#{File.dirname(@path)}/assets/javascripts")
+    Plugin::JsManager.js_asset_exists?(directory_name)
   end
 
   def extra_js_asset_exists?
@@ -963,27 +1029,52 @@ class Plugin::Instance
   end
 
   def admin_js_asset_exists?
-    File.exist?("#{File.dirname(@path)}/admin/assets/javascripts")
+    Plugin::JsManager.admin_js_asset_exists?(directory_name)
   end
 
   def test_js_asset_exists?
-    File.exist?("#{File.dirname(@path)}/test/javascripts")
+    Plugin::JsManager.test_js_asset_exists?(directory_name)
   end
 
   # Receives an array with two elements:
   # 1. A symbol that represents the name of the value to filter.
   # 2. A Proc that takes the existing ActiveRecord::Relation and the value received from the front-end.
-  def add_custom_reviewable_filter(filter)
+  #
+  # type_filter accepts an id and filter value for the Type control. reason_filters accepts an
+  # array or callable returning ids, names, and filter values for the Reason control.
+  def add_custom_reviewable_filter(filter, type_filter: nil, reason_filters: nil)
     reloadable_patch { Reviewable.add_custom_filter(filter) }
+
+    if type_filter
+      DiscoursePluginRegistry.register_reviewable_filter_type_option(
+        type_filter.merge(filter: filter.first),
+        self,
+      )
+    end
+
+    if reason_filters
+      DiscoursePluginRegistry.register_reviewable_filter_reason_registration(
+        { filter: filter.first, options: reason_filters },
+        self,
+      )
+    end
   end
 
   # Register a new API key scope.
   #
   # Example:
-  # add_api_key_scope(:groups, { delete: { actions: %w[groups#add_members], params: %i[id] } })
+  # add_api_key_scope(
+  #   :groups,
+  #   { delete: { actions: %w[groups#remove_member], path_params: %i[id] } },
+  # )
   #
-  # This scope lets you add members to a group. Additionally, you can specify which group ids are allowed.
-  # The delete action is added to the groups resource.
+  # Use path_params for resource identifiers selected by the Rails route, and params for intentional
+  # query or body restrictions. Query and body values cannot satisfy path_params. Aliases are only
+  # for route parameters containing the same literal identifier. All configured restrictions in one
+  # scope row must match; use separate rows for alternate identifier systems.
+  #
+  # This scope lets you remove members from a group. Additionally, you can specify which group ids
+  # are allowed. Registering an existing resource and action replaces conflicting mapping arrays.
   def add_api_key_scope(resource, action)
     DiscoursePluginRegistry.register_api_key_scope_mapping({ resource => action }, self)
   end
@@ -1017,6 +1108,29 @@ class Plugin::Instance
     )
   end
 
+  # Register a primitive exposed through Discourse's MCP server. Registered
+  # primitives remain disabled until an admin enables them.
+  def register_mcp_tool(identifier, **attributes)
+    register_mcp_primitive(:tool, identifier, **attributes)
+  end
+
+  def register_mcp_resource_template(identifier, **attributes)
+    register_mcp_primitive(:resource_template, identifier, **attributes)
+  end
+
+  def register_mcp_prompt(identifier, **attributes)
+    register_mcp_primitive(:prompt, identifier, **attributes)
+  end
+
+  def register_mcp_primitive(kind, identifier, **attributes)
+    configured_availability = attributes.delete(:availability)
+    attributes[:provider] ||= name || directory_name
+    attributes[:availability] = -> do
+      enabled? && (configured_availability.nil? || configured_availability.call)
+    end
+    DiscourseMcp.registry.public_send("register_#{kind}", identifier, **attributes)
+  end
+
   # Register a route which can be authenticated using an api key or user api key
   # in a query parameter rather than a header. For example:
   #
@@ -1031,6 +1145,98 @@ class Plugin::Instance
   def add_api_parameter_route(methods: nil, actions: nil, formats: nil)
     DiscoursePluginRegistry.register_api_parameter_route(
       RouteMatcher.new(methods: methods, actions: actions, formats: formats),
+      self,
+    )
+  end
+
+  # Register an additional calendar subscription feed that appears in the user's
+  # calendar subscription preferences. Each feed needs a name (unique key),
+  # user API key scope name, and a lambda that builds the URL given (base_url, user, key).
+  #
+  # Example:
+  #   register_calendar_subscription_feed(
+  #     name: "all_events",
+  #     scope: "my-plugin:events_calendar",
+  #     description_key: "my_plugin.preferences.all_events_description",
+  #     url: ->(base_url, user, key) { "#{base_url}/events.ics?user_api_key=#{key}" }
+  #   )
+  def register_calendar_subscription_feed(name:, scope:, description_key:, url:)
+    DiscoursePluginRegistry.register_calendar_subscription_feed(
+      { name: name, scope: scope, description_key: description_key, url: url },
+      self,
+    )
+  end
+
+  # Registers a plugin page as an option for the default_homepage site setting.
+  # The route is also mounted at `/` when the option is selected, while `path`
+  # remains the page's canonical URL for direct navigation.
+  #
+  # @param id [String, Symbol] stable identifier stored in the site setting
+  # @param name [String] client-side translation key used in the admin setting
+  # @param path [String] application path for the homepage
+  # @param route [String] Rails controller action, in `controller#action` form
+  # @param anonymous [Boolean] whether logged-out visitors may use this homepage
+  # @param server_side [Boolean] whether navigation requires a full page request
+  # @param enabled [Proc, nil] site-wide condition for offering this homepage in
+  #   the admin setting; while it returns false, a site that selected it falls
+  #   back to the top menu homepage
+  # @param available [Proc, nil] called with `guardian:` and `request:` (which
+  #   may be nil); when it returns false the visitor gets the regular top menu
+  #   homepage instead. It runs whenever the homepage is resolved, including on
+  #   page loads and topic list requests, so keep it cheap.
+  def register_homepage(
+    id,
+    name:,
+    path:,
+    route:,
+    anonymous: false,
+    server_side: false,
+    enabled: nil,
+    available: nil
+  )
+    id = id.to_s
+
+    if !id.match?(/\A[a-z0-9][a-z0-9_-]*\z/)
+      raise ArgumentError,
+            "homepage id must contain only lowercase letters, numbers, underscores, and hyphens"
+    end
+    raise ArgumentError, "homepage name must be present" if name.blank?
+    raise ArgumentError, "homepage path must start with /" if !path.to_s.start_with?("/")
+    if !route.to_s.match?(/\A[^#]+#[^#]+\z/)
+      raise ArgumentError, "homepage route must use controller#action format"
+    end
+    if ![true, false].include?(anonymous)
+      raise ArgumentError, "homepage anonymous must be true or false"
+    end
+    if ![true, false].include?(server_side)
+      raise ArgumentError, "homepage server_side must be true or false"
+    end
+    if !enabled.nil? && !enabled.respond_to?(:call)
+      raise ArgumentError, "homepage enabled must be callable"
+    end
+    if !available.nil? && !available.respond_to?(:call)
+      raise ArgumentError, "homepage available must be callable"
+    end
+
+    registered_ids =
+      DiscoursePluginRegistry._raw_homepage_options.map { |entry| entry[:value][:id] }
+    core_homepage_ids =
+      Discourse.filters.map(&:to_s) + %w[categories custom blank finish_installation]
+    if core_homepage_ids.include?(id) || registered_ids.include?(id)
+      raise ArgumentError, "homepage id '#{id}' is already registered"
+    end
+
+    DiscoursePluginRegistry.register_homepage_option(
+      {
+        id: id,
+        name: name,
+        path: path.to_s,
+        route: route.to_s,
+        anonymous: anonymous,
+        server_side: server_side,
+        enabled: enabled,
+        available: available,
+      },
       self,
     )
   end
@@ -1182,12 +1388,65 @@ class Plugin::Instance
   #   "chat_messages_30_days": 100,
   #   "chat_messages_count": 1000,
   # }
-  def register_stat(name, expose_via_api: false, &block)
+  def register_stat(name, expose_via_api: false, stat_type: nil, &block)
     # We do not want to register and display the same group multiple times.
-    return if DiscoursePluginRegistry.stats.any? { |stat| stat.name == name }
+    if DiscoursePluginRegistry.stats.any? { |stat|
+         stat.name == name && stat.stat_type == stat_type
+       }
+      return
+    end
 
-    stat = Stat.new(name, expose_via_api: expose_via_api, &block)
+    stat = Stat.new(name, expose_via_api: expose_via_api, stat_type: stat_type, &block)
     DiscoursePluginRegistry.register_stat(stat, self)
+  end
+
+  # Registers a KPI tile in the admin dashboard "Highlights" section
+  # (gated by the dashboard_improvements upcoming change). The KPI is rendered
+  # as a tile linking to /admin/reports/:report.
+  #
+  # @param type [Symbol] unique identifier for the KPI. Used as the i18n key
+  #   (admin.dashboard.highlights.kpi.<type>.label / .tooltip) and to
+  #   namespace the percentage-formatting client-side.
+  # @param report [String] the underlying Report.find type.
+  # @param enabled [Proc] optional gate evaluated on every dashboard build.
+  #   Return false to omit the KPI without disabling the plugin entirely.
+  def register_admin_dashboard_highlight_kpi(type:, report:, enabled: nil)
+    DiscoursePluginRegistry.register_admin_dashboard_highlight_kpi(
+      { type: type, report: report, enabled: enabled },
+      self,
+    )
+  end
+
+  # Registers a whole section in the redesigned admin dashboard (gated by the
+  # dashboard_improvements upcoming change). The matching client-side section
+  # component must be registered via the JS `api.registerAdminDashboardSection`.
+  #
+  # @param id [String] unique section id. Matched against the persisted
+  #   configuration and the client-side component registry.
+  # @param enabled [Proc] optional gate evaluated when assembling the dashboard.
+  #   Return false to omit the section (and hide it from the configure menu)
+  #   without disabling the plugin entirely — e.g. only when relevant data
+  #   exists.
+  # @param settings [Hash<String, Class>] optional map of setting key to a
+  #   class responding to `.permit` (a strong-params shape) and `.validate`
+  #   (raises `Discourse::InvalidParameters` or returns the sanitized value to
+  #   persist). Lets the section's own filter selections be saved via
+  #   `PUT /admin/dashboard/sections/:id/settings/:key`, the same mechanism
+  #   core sections use. A setting inherits the section's own `enabled` gate
+  #   rather than declaring its own.
+  # @yield [start_date:, end_date:, current_user:] block returning the section's
+  #   data hash, run inside the dashboard's parallel section loader.
+  def register_admin_dashboard_section(id:, enabled: nil, settings: nil, &loader)
+    settings&.each_value do |setting|
+      if !setting.respond_to?(:permit) || !setting.respond_to?(:validate)
+        raise ArgumentError, "#{setting} must respond to .permit and .validate"
+      end
+    end
+
+    DiscoursePluginRegistry.register_admin_dashboard_section(
+      { id: id.to_s, enabled: enabled, settings: settings&.transform_keys(&:to_s), loader: loader },
+      self,
+    )
   end
 
   ##
@@ -1238,6 +1497,14 @@ class Plugin::Instance
     DiscoursePluginRegistry.register_hashtag_autocomplete_data_source(klass, self)
   end
 
+  def register_hashtag_content_store(klass)
+    if !(klass < HashtagRemapper::Store)
+      raise ArgumentError.new("Hashtag content stores must inherit from HashtagRemapper::Store")
+    end
+
+    DiscoursePluginRegistry.register_hashtag_content_store(klass, self)
+  end
+
   ##
   # Used to set up the priority ordering of hashtag autocomplete results by
   # type using HashtagAutocompleteService.
@@ -1277,6 +1544,34 @@ class Plugin::Instance
   def register_bookmarkable(klass)
     return if Bookmark.registered_bookmarkable_from_type(klass.model.name).present?
     DiscoursePluginRegistry.register_bookmarkable(RegisteredBookmarkable.new(klass), self)
+  end
+
+  ##
+  # Register a class that implements [AdminDashboard::Reports::SourceProvider],
+  # exposing a kind of report (built-in, Data Explorer query, etc.) for the
+  # customisable Reports section on the new admin dashboard. The class must
+  # inherit from AdminDashboard::Reports::SourceProvider and declare a unique
+  # `.source_name`; see the base class for the full contract.
+  def register_admin_dashboard_report_source(provider_class)
+    if !provider_class.is_a?(Class) || !(provider_class < ::AdminDashboard::Reports::SourceProvider)
+      raise ArgumentError,
+            "register_admin_dashboard_report_source expects a subclass of " \
+              "AdminDashboard::Reports::SourceProvider, got #{provider_class.inspect}"
+    end
+
+    existing =
+      ::AdminDashboard::Reports::Registry.providers.find do |klass|
+        klass.source_name.to_s == provider_class.source_name.to_s
+      end
+
+    return if existing == provider_class
+
+    if existing
+      raise ArgumentError,
+            "Source #{provider_class.source_name.inspect} is already registered by #{existing}"
+    end
+
+    DiscoursePluginRegistry.register_admin_dashboard_report_source(provider_class, self)
   end
 
   ##
@@ -1371,13 +1666,12 @@ class Plugin::Instance
     DiscoursePluginRegistry.register_search_handler(handler, self)
   end
 
-  # This is an experimental API and may be changed or removed in the future without deprecation.
-  #
   # Adds a custom rate limiter to the request rate limiters stack. Only one rate limiter is used per request and the
   # first rate limiter in the stack that is active is used. By default the rate limiters stack contains the following
   # rate limiters:
   #
   #   `RequestTracker::RateLimiters::User` - Rate limits authenticated requests based on the user's id
+  #   `RequestTracker::RateLimiters::HealthCheck` - Rate limits health check requests per IP and backend hostname
   #   `RequestTracker::RateLimiters::IP` - Rate limits requests based on the IP address
   #
   # @param identifier [Symbol] A unique identifier for the rate limiter.
@@ -1470,7 +1764,7 @@ class Plugin::Instance
   protected
 
   def self.js_path
-    File.expand_path "#{Rails.root}/app/assets/generated"
+    File.expand_path "#{Rails.root.join("app/assets/generated")}"
   end
 
   def extra_js_file_path
@@ -1493,7 +1787,7 @@ class Plugin::Instance
   end
 
   def ensure_images_symlink!
-    link_from = "#{Rails.root}/app/assets/generated/#{directory_name}/images"
+    link_from = "#{Rails.root.join("app/assets/generated/#{directory_name}/images")}"
     link_target = "#{directory}/assets/images"
 
     if Dir.exist? link_target

@@ -15,10 +15,6 @@ export default class ChatThreadPane extends ChatChannelPane {
     );
   }
 
-  get selectedMessageIds() {
-    return this.thread.messagesManager.selectedMessages.map((item) => item.id);
-  }
-
   async close() {
     await this.router.transitionTo("chat.channel", ...this.channel.routeModels);
   }

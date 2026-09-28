@@ -4,9 +4,9 @@ import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import { schedule } from "@ember/runloop";
 import { service } from "@ember/service";
-import { htmlSafe } from "@ember/template";
-import icon from "discourse/helpers/d-icon";
+import { trustHTML } from "@ember/template";
 import { resettableTracked } from "discourse/lib/tracked-tools";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
 
 export default class FormTemplateFieldTextarea extends Component {
   @service appEvents;
@@ -25,15 +25,15 @@ export default class FormTemplateFieldTextarea extends Component {
 
   @action
   handleReplaceText(oldVal, newVal) {
-    if (this.value?.includes(oldVal)) {
-      const escapedOldVal = oldVal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const regex = new RegExp(escapedOldVal, "g");
-      this.value = this.value.replace(regex, newVal ?? "");
-
-      schedule("afterRender", () => {
-        this.args.onChange?.();
-      });
+    if (!this.value?.includes(oldVal)) {
+      return;
     }
+
+    this.value = this.value.replace(oldVal, newVal ?? "");
+
+    schedule("afterRender", () => {
+      this.args.onChange?.();
+    });
   }
 
   @action
@@ -48,26 +48,26 @@ export default class FormTemplateFieldTextarea extends Component {
         <label class="form-template-field__label">
           {{@attributes.label}}
           {{#if @validations.required}}
-            {{icon "asterisk" class="form-template-field__required-indicator"}}
+            {{dIcon "asterisk" class="form-template-field__required-indicator"}}
           {{/if}}
         </label>
       {{/if}}
 
       {{#if @attributes.description}}
         <span class="form-template-field__description">
-          {{htmlSafe @attributes.description}}
+          {{trustHTML @attributes.description}}
         </span>
       {{/if}}
 
       <Textarea
-        name={{@id}}
-        @value={{this.value}}
         class="form-template-field__textarea"
-        placeholder={{@attributes.placeholder}}
-        pattern={{@validations.pattern}}
-        minlength={{@validations.minimum}}
         maxlength={{@validations.maximum}}
+        minlength={{@validations.minimum}}
+        name={{@id}}
+        pattern={{@validations.pattern}}
+        placeholder={{@attributes.placeholder}}
         required={{if @validations.required "required" ""}}
+        @value={{this.value}}
         {{on "input" this.onInput}}
       />
     </div>

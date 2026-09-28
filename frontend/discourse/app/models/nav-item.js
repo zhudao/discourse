@@ -1,9 +1,7 @@
 import { tracked } from "@glimmer/tracking";
-import EmberObject from "@ember/object";
+import EmberObject, { computed } from "@ember/object";
 import { dependentKeyCompat } from "@ember/object/compat";
-import { reads } from "@ember/object/computed";
 import { service } from "@ember/service";
-import discourseComputed from "discourse/lib/decorators";
 import deprecated from "discourse/lib/deprecated";
 import { getOwnerWithFallback } from "discourse/lib/get-owner";
 import getURL from "discourse/lib/get-url";
@@ -122,7 +120,6 @@ export default class NavItem extends EmberObject {
     if (!args.siteSettings) {
       deprecated("You must supply `buildList` with a `siteSettings` object", {
         since: "2.6.0",
-        dropFrom: "2.7.0",
         id: "discourse.nav-item.built-list-site-settings",
       });
       args.siteSettings = getOwnerWithFallback(this).lookup(
@@ -132,7 +129,7 @@ export default class NavItem extends EmberObject {
     let items = args.siteSettings.top_menu.split("|");
 
     const user = getOwnerWithFallback(this).lookup("service:current-user");
-    if (user?.new_new_view_enabled) {
+    if (user?.unified_new_enabled) {
       items = items.filter((item) => item !== "unread");
     }
     const filterType = (args.filterMode || "").split("/").pop();
@@ -185,7 +182,7 @@ export default class NavItem extends EmberObject {
 
       const before = item.before;
       if (before) {
-        let i = 0;
+        let i;
         for (i = 0; i < items.length; i++) {
           if (items[i].name === before) {
             break;
@@ -225,10 +222,23 @@ export default class NavItem extends EmberObject {
 
   @tracked name;
   @tracked tag;
-  @reads("name") filterType;
 
   @tracked _title;
   @tracked _displayName;
+
+  @tracked _filterTypeOverride;
+
+  @dependentKeyCompat
+  get filterType() {
+    if (this._filterTypeOverride !== undefined) {
+      return this._filterTypeOverride;
+    }
+    return this.name;
+  }
+
+  set filterType(value) {
+    this._filterTypeOverride = value;
+  }
 
   @dependentKeyCompat
   get title() {
@@ -238,8 +248,8 @@ export default class NavItem extends EmberObject {
 
     let nameKey = this.name.replace("/", ".");
 
-    if (nameKey === "new" && this.currentUser?.new_new_view_enabled) {
-      nameKey = "new_new";
+    if (nameKey === "new" && this.currentUser?.unified_new_enabled) {
+      nameKey = "unified_new";
     }
 
     return i18n("filters." + nameKey + ".help", {});
@@ -276,8 +286,8 @@ export default class NavItem extends EmberObject {
     this._displayName = value;
   }
 
-  @discourseComputed("filterType", "category", "noSubcategories", "tag")
-  href(filterType, category, noSubcategories, tag) {
+  @computed("filterType", "category", "noSubcategories", "tag")
+  get href() {
     let customHref = null;
 
     NavItem.customNavItemHrefs.forEach(function (cb) {
@@ -291,25 +301,29 @@ export default class NavItem extends EmberObject {
       return getURL(customHref);
     }
 
-    const context = { category, noSubcategories, tag };
-    return NavItem.pathFor(filterType, context);
+    const context = {
+      category: this.category,
+      noSubcategories: this.noSubcategories,
+      tag: this.tag,
+    };
+    return NavItem.pathFor(this.filterType, context);
   }
 
-  @discourseComputed("name", "category", "noSubcategories")
-  filterMode(name, category, noSubcategories) {
+  @computed("name", "category", "noSubcategories")
+  get filterMode() {
     let mode = "";
-    if (category) {
+    if (this.category) {
       mode += "c/";
-      mode += Category.slugFor(category);
-      if (noSubcategories) {
+      mode += Category.slugFor(this.category);
+      if (this.noSubcategories) {
         mode += "/none";
       }
       mode += "/l/";
     }
-    return mode + name.replace(" ", "-");
+    return mode + this.name.replace(" ", "-");
   }
 
-  @discourseComputed(
+  @computed(
     "name",
     "category",
     "tag",
@@ -317,13 +331,13 @@ export default class NavItem extends EmberObject {
     "currentRouteQueryParams",
     "topicTrackingState.messageCount"
   )
-  count(name, category, tag, noSubcategories, currentRouteQueryParams) {
+  get count() {
     return this.topicTrackingState?.lookupCount({
-      type: name,
-      category,
-      tagId: tag?.id,
-      noSubcategories,
-      customFilterFn: hasTrackedFilter(currentRouteQueryParams)
+      type: this.name,
+      category: this.category,
+      tagId: this.tag?.id,
+      noSubcategories: this.noSubcategories,
+      customFilterFn: hasTrackedFilter(this.currentRouteQueryParams)
         ? isTrackedTopic
         : undefined,
     });

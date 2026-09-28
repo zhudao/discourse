@@ -87,7 +87,7 @@
 
 .d-editor-input {
   border: 0;
-  padding: 10px;
+  padding: var(--space-2);
   height: 100%;
   overflow-x: hidden;
   overscroll-behavior: contain;
@@ -113,7 +113,8 @@
   }
 }
 
-.hide-preview .d-editor-preview-wrapper {
+.hide-preview .d-editor-preview-wrapper,
+.--rich-editor-enabled .d-editor-preview-wrapper {
   display: none;
   flex: 0;
 }
@@ -312,25 +313,34 @@
   }
 }
 
-// d-editor bar button sizing
+.d-editor-button-bar__wrap {
+  position: relative;
+  min-width: 0;
+  overflow: clip;
+  border-start-start-radius: inherit;
+  border-start-end-radius: inherit;
+
+  :where(body:not(.uc-enable-composer-redesign) &) {
+    margin-inline: var(--space-2);
+  }
+}
+
 .d-editor-button-bar {
   display: flex;
   flex-direction: row;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: var(--space-2);
-  margin: 0.25rem 0;
+  margin: 0;
+  padding-block: var(--space-1);
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
 
-  @include viewport.until(sm) {
-    flex-wrap: nowrap;
-    padding-block: var(--space-1);
-    overflow-x: auto;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-    max-width: 100%;
-
-    &::-webkit-scrollbar {
-      display: none;
-    }
+  // the toolbar can be rendered outside .d-editor-textarea-wrapper, so the
+  // disabled state is carried on the bar itself
+  &.--disabled {
+    opacity: 0.5;
+    pointer-events: none;
   }
 
   .btn:focus-visible {
@@ -366,7 +376,6 @@
 
   &.--replaced-toolbar {
     animation: float-left ease 0.2s 1 forwards;
-    flex-wrap: nowrap;
 
     @keyframes float-left {
       0% {
@@ -398,6 +407,7 @@
 
   &.--active {
     background: var(--d-selected);
+    color: var(--d-selected-text-color);
 
     &.btn:hover .d-icon {
       color: var(--primary-high);

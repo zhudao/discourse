@@ -1,9 +1,8 @@
 /* eslint-disable ember/no-observers */
 import Controller, { inject as controller } from "@ember/controller";
-import EmberObject, { action } from "@ember/object";
+import EmberObject, { action, computed } from "@ember/object";
 import { observes } from "@ember-decorators/object";
 import { addUniqueValueToArray } from "discourse/lib/array-tools";
-import discourseComputed from "discourse/lib/decorators";
 
 export default class GroupManageLogsController extends Controller {
   @controller group;
@@ -13,33 +12,19 @@ export default class GroupManageLogsController extends Controller {
   offset = 0;
   filters = EmberObject.create();
 
-  @discourseComputed(
+  @computed(
     "filters.action",
     "filters.acting_user",
     "filters.target_user",
     "filters.subject"
   )
-  filterParams(filtersAction, acting_user, target_user, subject) {
-    return { action: filtersAction, acting_user, target_user, subject };
-  }
-
-  @observes(
-    "filters.action",
-    "filters.acting_user",
-    "filters.target_user",
-    "filters.subject"
-  )
-  _refreshModel() {
-    this.get("group.model")
-      .findLogs(0, this.filterParams)
-      .then((results) => {
-        this.set("offset", 0);
-
-        this.model.setProperties({
-          logs: results.logs,
-          all_loaded: results.all_loaded,
-        });
-      });
+  get filterParams() {
+    return {
+      action: this.filters?.action,
+      acting_user: this.filters?.acting_user,
+      target_user: this.filters?.target_user,
+      subject: this.filters?.subject,
+    };
   }
 
   reset() {
@@ -72,5 +57,24 @@ export default class GroupManageLogsController extends Controller {
   @action
   clearFilter(key) {
     this.set(`filters.${key}`, "");
+  }
+
+  @observes(
+    "filters.action",
+    "filters.acting_user",
+    "filters.target_user",
+    "filters.subject"
+  )
+  _refreshModel() {
+    this.get("group.model")
+      .findLogs(0, this.filterParams)
+      .then((results) => {
+        this.set("offset", 0);
+
+        this.model.setProperties({
+          logs: results.logs,
+          all_loaded: results.all_loaded,
+        });
+      });
   }
 }

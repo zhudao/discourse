@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-describe "Composer - Drafts", type: :system do
+describe "Composer - Drafts" do
   fab!(:topic, :topic_with_op)
   fab!(:current_user, :admin)
 
@@ -125,6 +125,107 @@ describe "Composer - Drafts", type: :system do
     end
   end
 
+  context "when discarding while editing a post" do
+    fab!(:post_1) { Fabricate(:post, topic:, user: current_user) }
+
+    before { Jobs.run_immediately! }
+
+    it "does not show the discard modal when there are no changes" do
+      topic_page.visit_topic(post_1.topic)
+      topic_page.click_post_action_button(post_1, :edit)
+
+      expect(composer).to be_opened
+      composer.discard
+
+      expect(discard_draft_modal).to be_closed
+      expect(composer).to be_closed
+    end
+
+    it "does not show the discard modal when editing the first post with no changes" do
+      first_post = topic.first_post
+      first_post.update!(user: current_user)
+
+      topic_page.visit_topic(topic)
+      topic_page.click_post_action_button(first_post, :edit)
+
+      expect(composer).to be_opened
+      composer.discard
+
+      expect(discard_draft_modal).to be_closed
+      expect(composer).to be_closed
+    end
+
+    it "shows the discard modal with editing-specific text when there are changes" do
+      topic_page.visit_topic(post_1.topic)
+      topic_page.click_post_action_button(post_1, :edit)
+      composer.fill_content("edited content here")
+      composer.discard
+
+      expect(discard_draft_modal).to be_open
+      expect(page).to have_css(
+        ".discard-draft-modal",
+        text: I18n.t("js.post.cancel_composer.confirm_edit"),
+      )
+      expect(page).to have_css(
+        ".discard-draft-modal__discard-btn",
+        text: I18n.t("js.post.cancel_composer.discard_edit"),
+      )
+    end
+
+    it "shows the discard modal with editing-specific text when editing the first post" do
+      first_post = topic.first_post
+      first_post.update!(user: current_user)
+
+      topic_page.visit_topic(topic)
+      topic_page.click_post_action_button(first_post, :edit)
+      composer.fill_content("edited content here")
+      composer.discard
+
+      expect(discard_draft_modal).to be_open
+      expect(page).to have_css(
+        ".discard-draft-modal",
+        text: I18n.t("js.post.cancel_composer.confirm_edit"),
+      )
+    end
+
+    it "shows the cancel edit button instead of discard" do
+      topic_page.visit_topic(post_1.topic)
+      topic_page.click_post_action_button(post_1, :edit)
+
+      expect(composer).to be_opened
+      expect(page).to have_css(".discard-button", text: I18n.t("js.composer.cancel_edit"))
+    end
+  end
+
+  context "when discarding while creating a post" do
+    before { Jobs.run_immediately! }
+
+    it "shows the discard modal with post-specific text when there are changes" do
+      visit "/new-topic"
+
+      composer.fill_title("this is a test topic")
+      composer.fill_content("a b c d e f g")
+      composer.discard
+
+      expect(discard_draft_modal).to be_open
+      expect(page).to have_css(
+        ".discard-draft-modal",
+        text: I18n.t("js.post.cancel_composer.confirm"),
+      )
+      expect(page).to have_css(
+        ".discard-draft-modal__discard-btn",
+        text: I18n.t("js.post.cancel_composer.discard"),
+      )
+    end
+
+    it "shows the discard button" do
+      visit "/new-topic"
+
+      expect(composer).to be_opened
+      expect(page).to have_css(".discard-button", text: I18n.t("js.composer.discard"))
+    end
+  end
+
   context "when editing different post" do
     fab!(:post_1) { Fabricate(:post, topic:, user: current_user) }
     fab!(:post_2) { Fabricate(:post, topic:, user: current_user) }
@@ -185,6 +286,48 @@ describe "Composer - Drafts", type: :system do
 
       expect(discard_draft_modal).to be_closed
       expect(composer).to be_opened
+    end
+  end
+
+  context "when resuming a saved edit draft" do
+    fab!(:post_1) { Fabricate(:post, topic:, user: current_user, raw: "original post content") }
+    fab!(:post_2) { Fabricate(:post, topic:, user: current_user, raw: "another post content") }
+
+    before do
+      topic_page.visit_topic(topic)
+      topic_page.click_post_action_button(post_1, :edit)
+      composer.fill_content("edited post content")
+      composer.close
+
+      expect(toasts).to have_success(I18n.t("js.composer.draft_saved"))
+    end
+
+    it "lets the user finish their edit after clicking reply" do
+      topic_page.click_reply_button
+
+      expect(composer).to have_content("edited post content")
+      expect(composer.button_label).to have_text(I18n.t("js.composer.save_edit"))
+
+      composer.create
+
+      expect(composer).to be_closed
+      expect(topic_page).to have_post_content(
+        post_number: post_1.post_number,
+        content: "edited post content",
+      )
+    end
+
+    it "shows the user their saved edit when they edit the same post again" do
+      topic_page.click_post_action_button(post_1, :edit)
+
+      expect(composer).to have_content("edited post content")
+      expect(composer.button_label).to have_text(I18n.t("js.composer.save_edit"))
+    end
+
+    it "shows the user the original content when they edit a different post" do
+      topic_page.click_post_action_button(post_2, :edit)
+
+      expect(composer).to have_content("another post content")
     end
   end
 
@@ -335,7 +478,7 @@ describe "Composer - Drafts", type: :system do
       end
 
       composer.open_composer_actions
-      composer.select_action(I18n.t("js.composer.composer_actions.reply_as_new_topic.label"))
+      composer.select_action_by_id("reply_as_new_topic")
 
       expect(composer).to be_opened
       composer.fill_title("This is a linked topic title for testing")

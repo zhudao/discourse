@@ -3,26 +3,29 @@ import { tracked } from "@glimmer/tracking";
 import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
-import { htmlSafe } from "@ember/template";
+import { trustHTML } from "@ember/template";
 import { isEmpty } from "@ember/utils";
-import DButton from "discourse/components/d-button";
-import DModal from "discourse/components/d-modal";
+import CodeLoginForm from "discourse/components/code-login-form";
 import { ajax } from "discourse/lib/ajax";
 import { extractError } from "discourse/lib/ajax-error";
 import cookie from "discourse/lib/cookie";
 import getURL from "discourse/lib/get-url";
 import { escapeExpression } from "discourse/lib/utilities";
+import { not } from "discourse/truth-helpers";
+import DButton from "discourse/ui-kit/d-button";
+import DModal from "discourse/ui-kit/d-modal";
 import { i18n } from "discourse-i18n";
 
 export default class ForgotPassword extends Component {
   @service siteSettings;
 
   @tracked
-  emailOrUsername = cookie("email") || this.args.model?.emailOrUsername || "";
+  emailOrUsername = this.args.model?.emailOrUsername ?? cookie("email") ?? "";
   @tracked disabled = false;
   @tracked helpSeen = false;
   @tracked offerHelp;
   @tracked flash;
+  @tracked codeSent = this.args.model?.codeSent ?? false;
 
   get submitDisabled() {
     if (this.disabled) {
@@ -32,6 +35,11 @@ export default class ForgotPassword extends Component {
     } else {
       return isEmpty(this.emailOrUsername.trim());
     }
+  }
+
+  @action
+  changeLogin() {
+    this.codeSent = false;
   }
 
   @action
@@ -60,6 +68,11 @@ export default class ForgotPassword extends Component {
         type: "POST",
       });
 
+      if (data.email_code && data.user_found !== false) {
+        this.codeSent = true;
+        return;
+      }
+
       const emailOrUsername = escapeExpression(this.emailOrUsername);
 
       let key = "forgot_password.complete";
@@ -68,7 +81,7 @@ export default class ForgotPassword extends Component {
       if (data.user_found === false) {
         key += "_not_found";
 
-        this.flash = htmlSafe(
+        this.flash = trustHTML(
           i18n(key, {
             email: emailOrUsername,
             username: emailOrUsername,
@@ -94,27 +107,34 @@ export default class ForgotPassword extends Component {
 
   <template>
     <DModal
-      @title={{i18n "forgot_password.title"}}
+      class="forgot-password-modal"
       @closeModal={{@closeModal}}
       @flash={{this.flash}}
       @flashType="error"
-      class="forgot-password-modal"
+      @title={{i18n "forgot_password.title"}}
     >
       <:body>
-        {{#if this.offerHelp}}
-          {{htmlSafe this.offerHelp}}
+        {{#if this.codeSent}}
+          <CodeLoginForm
+            @context="password-reset"
+            @initialEmail={{this.emailOrUsername}}
+            @initialStep="code"
+            @onChangeEmail={{this.changeLogin}}
+          />
+        {{else if this.offerHelp}}
+          {{trustHTML this.offerHelp}}
         {{else if this.siteSettings.hide_email_address_taken}}
           <label for="username-or-email">
             {{i18n "forgot_password.invite_no_username"}}
           </label>
           <input
-            {{on "input" this.updateEmailOrUsername}}
-            value={{this.emailOrUsername}}
+            autocapitalize="off"
+            autocorrect="off"
+            id="username-or-email"
             placeholder={{i18n "email"}}
             type="text"
-            id="username-or-email"
-            autocorrect="off"
-            autocapitalize="off"
+            value={{this.emailOrUsername}}
+            {{on "input" this.updateEmailOrUsername}}
           />
         {{else}}
           <p>{{i18n "forgot_password.invite"}}</p>
@@ -122,13 +142,13 @@ export default class ForgotPassword extends Component {
             {{i18n "forgot_password.email-username"}}
           </label>
           <input
-            {{on "input" this.updateEmailOrUsername}}
-            value={{this.emailOrUsername}}
+            autocapitalize="off"
+            autocorrect="off"
+            id="username-or-email"
             placeholder={{i18n "login.email_placeholder"}}
             type="text"
-            id="username-or-email"
-            autocorrect="off"
-            autocapitalize="off"
+            value={{this.emailOrUsername}}
+            {{on "input" this.updateEmailOrUsername}}
           />
         {{/if}}
       </:body>
@@ -136,26 +156,26 @@ export default class ForgotPassword extends Component {
       <:footer>
         {{#if this.offerHelp}}
           <DButton
+            class="btn-large btn-primary"
+            type="submit"
             @action={{@closeModal}}
             @label="forgot_password.button_ok"
-            type="submit"
-            class="btn-large btn-primary"
           />
           {{#unless this.helpSeen}}
             <DButton
-              @action={{this.help}}
-              @label="forgot_password.button_help"
-              @icon="circle-question"
               class="btn-large"
+              @action={{this.help}}
+              @icon="circle-question"
+              @label="forgot_password.button_help"
             />
           {{/unless}}
-        {{else}}
+        {{else if (not this.codeSent)}}
           <DButton
+            class="btn-primary forgot-password-reset"
+            type="submit"
             @action={{this.resetPassword}}
             @disabled={{this.submitDisabled}}
             @label="forgot_password.reset"
-            type="submit"
-            class="btn-primary forgot-password-reset"
           />
         {{/if}}
       </:footer>

@@ -3,7 +3,7 @@ import Component from "@ember/component";
 import { fn } from "@ember/helper";
 import { on } from "@ember/modifier";
 import { action } from "@ember/object";
-import { htmlSafe } from "@ember/template";
+import { trustHTML } from "@ember/template";
 import {
   attributeBindings,
   classNameBindings,
@@ -14,14 +14,14 @@ import HighlightSearch from "discourse/components/highlight-search";
 import PluginOutlet from "discourse/components/plugin-outlet";
 import TopicStatus from "discourse/components/topic-status";
 import TrackSelected from "discourse/components/track-selected";
-import avatar from "discourse/helpers/avatar";
-import categoryLink from "discourse/helpers/category-link";
-import icon from "discourse/helpers/d-icon";
-import discourseTags from "discourse/helpers/discourse-tags";
-import formatDate from "discourse/helpers/format-date";
 import lazyHash from "discourse/helpers/lazy-hash";
 import { wantsNewWindow } from "discourse/lib/intercept-click";
 import { logSearchLinkClick } from "discourse/lib/search";
+import dAvatar from "discourse/ui-kit/helpers/d-avatar";
+import dCategoryLink from "discourse/ui-kit/helpers/d-category-link";
+import dDiscourseTags from "discourse/ui-kit/helpers/d-discourse-tags";
+import dFormatDate from "discourse/ui-kit/helpers/d-format-date";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
 
 @tagName("div")
 @classNames("fps-result")
@@ -57,8 +57,8 @@ export default class SearchResultEntry extends Component {
       @outletArgs={{lazyHash post=this.post}}
     >
       <div class="author">
-        <a href={{this.post.userPath}} data-user-card={{this.post.username}}>
-          {{avatar this.post imageSize="large"}}
+        <a data-user-card={{this.post.username}} href={{this.post.userPath}}>
+          {{dAvatar this.post imageSize="large"}}
         </a>
       </div>
 
@@ -69,31 +69,31 @@ export default class SearchResultEntry extends Component {
 
         {{#if this.bulkSelectEnabled}}
           <TrackSelected
-            @selectedList={{this.selected}}
-            @selectedId={{this.post}}
             class="bulk-select"
+            @selectedId={{this.post}}
+            @selectedList={{this.selected}}
           />
         {{/if}}
 
         <a
-          href={{this.post.url}}
-          {{on "click" (fn this.logClick this.post.topic_id)}}
-          class="search-link{{if this.post.topic.visited ' visited'}}"
-          role="heading"
           aria-level="2"
+          class="search-link{{if this.post.topic.visited ' visited'}}"
+          href={{this.post.url}}
+          role="heading"
+          {{on "click" (fn this.logClick this.post.topic_id)}}
         >
           <TopicStatus
-            @topic={{this.post.topic}}
             @disableActions={{true}}
             @showPrivateMessageIcon={{this.shouldShowPrivateMessageIcon}}
+            @topic={{this.post.topic}}
           />
 
           <span class="topic-title">
             {{#if this.post.useTopicTitleHeadline}}
-              {{htmlSafe this.post.topicTitleHeadline}}
+              {{trustHTML this.post.topicTitleHeadline}}
             {{else}}
               <HighlightSearch @highlight={{this.highlightQuery}}>
-                {{htmlSafe this.post.topic.fancyTitle}}
+                {{trustHTML this.post.topic.fancyTitle}}
               </HighlightSearch>
             {{/if}}
           </span>
@@ -105,16 +105,16 @@ export default class SearchResultEntry extends Component {
 
         <div class="search-category">
           {{#if this.post.topic.category.parentCategory}}
-            {{categoryLink this.post.topic.category.parentCategory}}
+            {{dCategoryLink this.post.topic.category.parentCategory}}
           {{/if}}
-          {{categoryLink this.post.topic.category hideParent=true}}
+          {{dCategoryLink this.post.topic.category hideParent=true}}
           {{#if this.post.topic}}
-            {{discourseTags this.post.topic}}
+            {{dDiscourseTags this.post.topic}}
           {{/if}}
           <span>
             <PluginOutlet
-              @name="full-page-search-category"
               @connectorTagName="div"
+              @name="full-page-search-category"
               @outletArgs={{lazyHash post=this.post}}
             />
           </span>
@@ -131,7 +131,7 @@ export default class SearchResultEntry extends Component {
       >
         <div class="blurb container">
           <span class="date">
-            {{formatDate this.post.created_at format="tiny"}}
+            {{dFormatDate this.post.created_at format="tiny"}}
             {{#if this.post.blurb}}
               <span class="separator">-</span>
             {{/if}}
@@ -139,10 +139,10 @@ export default class SearchResultEntry extends Component {
 
           {{#if this.post.blurb}}
             {{#if this.siteSettings.use_pg_headlines_for_excerpt}}
-              {{htmlSafe this.post.blurb}}
+              {{trustHTML this.post.blurb}}
             {{else}}
               <HighlightSearch @highlight={{this.highlightQuery}}>
-                {{htmlSafe this.post.blurb}}
+                {{trustHTML this.post.blurb}}
               </HighlightSearch>
             {{/if}}
           {{/if}}
@@ -157,7 +157,7 @@ export default class SearchResultEntry extends Component {
           {{#if this.post.like_count}}
             <span class="like-count">
               <span class="value">{{this.post.like_count}}</span>
-              {{icon "heart"}}
+              {{dIcon "heart"}}
             </span>
           {{/if}}
         {{/if}}

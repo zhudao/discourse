@@ -2,7 +2,7 @@
 
 class LlmModelSerializer < ApplicationSerializer
   # TODO: we probably should rename the table LlmModel to AiLlm
-  # it is consistent with AiPersona and AiTool
+  # it is consistent with AiAgent and AiTool
   # LLM model is a bit confusing given that large language model model is a confusing
   # name
   root "ai_llm"
@@ -18,6 +18,8 @@ class LlmModelSerializer < ApplicationSerializer
              :url,
              :provider_params,
              :vision_enabled,
+             :vision_mode,
+             :vision_llm_model_id,
              :input_cost,
              :output_cost,
              :cached_input_cost,
@@ -40,7 +42,7 @@ class LlmModelSerializer < ApplicationSerializer
   def used_by
     llm_usage =
       (
-        if (scope && scope[:llm_usage])
+        if scope && scope[:llm_usage]
           scope[:llm_usage]
         else
           DiscourseAi::Configuration::LlmEnumerator.global_usage

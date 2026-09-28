@@ -1,6 +1,4 @@
 import Component from "@glimmer/component";
-import { concat } from "@ember/helper";
-import { htmlSafe } from "@ember/template";
 import FKCharCounter from "discourse/form-kit/components/fk/char-counter";
 import FKErrors from "discourse/form-kit/components/fk/errors";
 
@@ -17,25 +15,18 @@ export default class FKMeta extends Component {
     return this.args.showMeta ?? true;
   }
 
-  get width() {
-    return this.args.controlWidth ? `${this.args.controlWidth}px` : "auto";
-  }
-
   <template>
     {{#if this.shouldRenderMeta}}
-      <div
-        class="form-kit__meta"
-        style={{htmlSafe (concat "width: " this.width)}}
-      >
+      <div class="form-kit__meta">
         {{#if @error}}
-          <FKErrors @id={{@field.errorId}} @error={{@error}} />
+          <FKErrors @error={{@error}} @id={{@field.errorId}} />
         {{/if}}
 
         {{#if this.shouldRenderCharCounter}}
           <FKCharCounter
-            @value={{@field.value}}
-            @minLength={{@field.minLength}}
             @maxLength={{@field.maxLength}}
+            @minLength={{@field.minLength}}
+            @value={{@field.value}}
           />
         {{/if}}
       </div>

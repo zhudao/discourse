@@ -1,10 +1,10 @@
 import { cached, tracked } from "@glimmer/tracking";
 import { get } from "@ember/object";
 import { dependentKeyCompat } from "@ember/object/compat";
+import { trackedObject } from "@ember/reactive/collections";
 import { schedule } from "@ember/runloop";
 import { service } from "@ember/service";
 import { isEmpty } from "@ember/utils";
-import { TrackedObject } from "@ember-compat/tracked-built-ins";
 import { Promise } from "rsvp";
 import { ajax } from "discourse/lib/ajax";
 import {
@@ -13,7 +13,7 @@ import {
 } from "discourse/lib/array-tools";
 import deprecated from "discourse/lib/deprecated";
 import { deepMerge } from "discourse/lib/object";
-import { trackedArray } from "discourse/lib/tracked-tools";
+import { autoTrackedArray } from "discourse/lib/tracked-tools";
 import { applyBehaviorTransformer } from "discourse/lib/transformer";
 import DiscourseURL from "discourse/lib/url";
 import { highlightPost } from "discourse/lib/utilities";
@@ -22,6 +22,25 @@ import { loadTopicView } from "discourse/models/topic";
 import { i18n } from "discourse-i18n";
 
 let _lastEditNotificationClick = null;
+
+function comparePostTimestamps(candidate, reference) {
+  const candidateTime = Date.parse(candidate);
+  const referenceTime = Date.parse(reference);
+  const candidateIsValid = !Number.isNaN(candidateTime);
+  const referenceIsValid = !Number.isNaN(referenceTime);
+
+  if (candidateIsValid && referenceIsValid) {
+    return candidateTime - referenceTime;
+  }
+  if (candidateIsValid) {
+    return 1;
+  }
+  if (referenceIsValid) {
+    return -1;
+  }
+
+  return candidate === reference ? 0 : 1;
+}
 
 export function Placeholder(viewName) {
   this.viewName = viewName;
@@ -68,11 +87,12 @@ export default class PostStream extends RestModel {
   @tracked stagingPost = false;
   @tracked timelineLookup = [];
 
-  @trackedArray posts = [];
-  @trackedArray stream = [];
-  @trackedArray userFilters = [];
+  @autoTrackedArray posts = [];
+  @autoTrackedArray stream = [];
+  @autoTrackedArray userFilters = [];
 
   _identityMap = {};
+  _pendingPostRefreshes = new Map();
 
   @dependentKeyCompat
   get loading() {
@@ -179,7 +199,7 @@ export default class PostStream extends RestModel {
   **/
   @dependentKeyCompat
   get streamFilters() {
-    const result = new TrackedObject();
+    const result = trackedObject();
 
     if (this.filter) {
       result.filter = this.filter;
@@ -266,6 +286,10 @@ export default class PostStream extends RestModel {
       lastIndex + 1,
       lastIndex + this.topic.chunk_size + 1
     );
+  }
+
+  get loadedPosts() {
+    return Object.values(this._identityMap).filter(Boolean);
   }
 
   cancelFilter() {
@@ -791,7 +815,7 @@ export default class PostStream extends RestModel {
     const existing = this._identityMap[postId];
 
     if (existing) {
-      return this.triggerChangedPost(postId, new Date());
+      return this.refreshPost(postId);
     }
 
     // need to insert into stream
@@ -848,40 +872,74 @@ export default class PostStream extends RestModel {
   }
 
   /**
+   * Fetches and stores the authoritative state of a loaded post.
+   *
+   * @param {number} postId - The ID of the post to refresh
+   * @param {Object} opts - Additional options for refreshing the post
+   * @param {boolean} [opts.preserveCooked] - Whether to preserve the cooked HTML content
+   * @returns {Promise} A promise that resolves when the post has been refreshed
+   */
+  refreshPost(postId, opts = {}) {
+    opts ||= {};
+
+    const existing = this._identityMap[postId];
+    if (!existing) {
+      return Promise.resolve();
+    }
+    postId = existing.id;
+
+    let refreshState = this._pendingPostRefreshes.get(postId);
+    if (!refreshState) {
+      let resolve;
+      let reject;
+      const reconciled = new Promise((promiseResolve, promiseReject) => {
+        resolve = promiseResolve;
+        reject = promiseReject;
+      });
+      refreshState = {
+        preserveCooked: true,
+        reconciled,
+        reject,
+        requests: [],
+        resolve,
+      };
+      this._pendingPostRefreshes.set(postId, refreshState);
+    }
+
+    refreshState.preserveCooked &&= Boolean(opts.preserveCooked);
+    const refresh = { status: "pending" };
+    refreshState.requests.push(refresh);
+
+    void ajax(`/posts/${postId}`).then(
+      (data) => {
+        refresh.data = data;
+        refresh.status = "succeeded";
+        this._reconcilePostRefresh(postId, refreshState);
+      },
+      (error) => {
+        refresh.error = error;
+        refresh.status = "failed";
+        this._reconcilePostRefresh(postId, refreshState);
+      }
+    );
+
+    return refreshState.reconciled;
+  }
+
+  /**
    * Updates a post in the stream when it has been changed on the server.
    *
    * @param {number} postId - The ID of the post to update
-   * @param {string} updatedAt - The timestamp when the post was last updated
+   * @param {string} updatedAt - The time when the change event was published
    * @param {Object} opts - Additional options for updating the post
    * @param {boolean} [opts.preserveCooked] - Whether to preserve the cooked HTML content
    * @returns {Promise} A promise that resolves when the post has been updated
    */
   async triggerChangedPost(postId, updatedAt, opts = {}) {
-    opts ||= {};
-
-    if (!postId) {
-      return;
-    }
-
     const existing = this._identityMap[postId];
 
-    // Only fetch and update if the post exists and has a different updated timestamp
-    if (existing && existing.updated_at !== updatedAt) {
-      // Fetch the latest post data from the server
-      const updatedData = await ajax(`/posts/${postId}`);
-
-      // Preserve the existing cooked HTML content if requested
-      if (opts.preserveCooked) {
-        updatedData.cooked = existing.cooked;
-      }
-
-      // Create a new post record with updated data and store it in the identity map.
-      // Creating a new record will update the existing one in the map, which will then
-      // trigger re-rendering of UI components that use the tracked data that was updated.
-      const updatedPost = this.store.createRecord("post", updatedData);
-
-      // Update the post in the post stream's identity map
-      this.storePost(updatedPost);
+    if (existing && comparePostTimestamps(updatedAt, existing.updated_at) > 0) {
+      return this.refreshPost(postId, opts);
     }
   }
 
@@ -1060,23 +1118,29 @@ export default class PostStream extends RestModel {
   }
 
   updateFromJson(postStreamData) {
-    this.posts.length = 0;
-    this.gaps = null;
+    applyBehaviorTransformer(
+      "post-stream-update-from-json",
+      () => {
+        this.posts.length = 0;
+        this.gaps = null;
 
-    if (postStreamData) {
-      // Load posts if present
-      postStreamData.posts.forEach((p) =>
-        this.appendPost(this.store.createRecord("post", p))
-      );
-      delete postStreamData.posts;
+        if (postStreamData) {
+          // Load posts if present
+          postStreamData.posts.forEach((p) =>
+            this.appendPost(this.store.createRecord("post", p))
+          );
+          delete postStreamData.posts;
 
-      // Update our attributes
-      postStreamData.gaps = {
-        before: new TrackedObject(postStreamData.gaps?.before || {}),
-        after: new TrackedObject(postStreamData.gaps?.after || {}),
-      };
-      this.setProperties(postStreamData);
-    }
+          // Update our attributes
+          postStreamData.gaps = {
+            before: trackedObject(postStreamData.gaps?.before || {}),
+            after: trackedObject(postStreamData.gaps?.after || {}),
+          };
+          this.setProperties(postStreamData);
+        }
+      },
+      { postStream: this }
+    );
   }
 
   /**
@@ -1304,6 +1368,43 @@ export default class PostStream extends RestModel {
     );
   }
 
+  _reconcilePostRefresh(postId, refreshState) {
+    if (this._pendingPostRefreshes.get(postId) !== refreshState) {
+      return;
+    }
+
+    for (
+      let requestIndex = refreshState.requests.length - 1;
+      requestIndex >= 0;
+      requestIndex--
+    ) {
+      const refresh = refreshState.requests[requestIndex];
+      if (refresh.status === "pending") {
+        return;
+      }
+
+      if (refresh.status === "succeeded") {
+        const latest = this._identityMap[postId];
+        if (
+          latest &&
+          comparePostTimestamps(refresh.data.updated_at, latest.updated_at) >= 0
+        ) {
+          if (refreshState.preserveCooked) {
+            refresh.data.cooked = latest.cooked;
+          }
+          this.storePost(this.store.createRecord("post", refresh.data));
+        }
+
+        this._pendingPostRefreshes.delete(postId);
+        refreshState.resolve();
+        return;
+      }
+    }
+
+    this._pendingPostRefreshes.delete(postId);
+    refreshState.reject(refreshState.requests.at(-1).error);
+  }
+
   _initUserModels(post) {
     if (post.mentioned_users) {
       post.mentioned_users = post.mentioned_users.map((u) =>
@@ -1336,17 +1437,19 @@ export default class PostStream extends RestModel {
   }
 
   _setSuggestedTopics(result) {
-    if (!result.suggested_topics) {
-      return;
-    }
+    applyBehaviorTransformer(
+      "post-stream-suggested-topics",
+      () => {
+        if (!result.suggested_topics) {
+          return;
+        }
 
-    this.topic.setProperties({
-      suggested_topics: result.suggested_topics,
-      suggested_group_name: result.suggested_group_name,
-    });
-
-    if (this.topic.isPrivateMessage) {
-      this.pmTopicTrackingState.startTracking();
-    }
+        this.topic.setProperties({
+          suggested_topics: result.suggested_topics,
+          suggested_group_name: result.suggested_group_name,
+        });
+      },
+      { postStream: this, result }
+    );
   }
 }

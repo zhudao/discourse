@@ -1,144 +1,75 @@
 /* eslint-disable ember/no-classic-components */
 import Component from "@ember/component";
-import { hash } from "@ember/helper";
-import { alias } from "@ember/object/computed";
+import { action, computed } from "@ember/object";
 import { service } from "@ember/service";
-import { htmlSafe } from "@ember/template";
+import { trustHTML } from "@ember/template";
 import { tagName } from "@ember-decorators/component";
-import PostLanguageSelector from "discourse/components/post-language-selector";
-import discourseComputed from "discourse/lib/decorators";
+import ComposerActions from "discourse/components/composer-actions";
 import escape from "discourse/lib/escape";
 import { iconHTML } from "discourse/lib/icon-library";
-import {
-  ADD_TRANSLATION,
-  CREATE_SHARED_DRAFT,
-  CREATE_TOPIC,
-  EDIT,
-  EDIT_SHARED_DRAFT,
-  PRIVATE_MESSAGE,
-  REPLY,
-} from "discourse/models/composer";
-import ComposerActions from "discourse/select-kit/components/composer-actions";
-import { i18n } from "discourse-i18n";
-
-const TITLES = {
-  [PRIVATE_MESSAGE]: "topic.private_message",
-  [CREATE_TOPIC]: "topic.create_long",
-  [CREATE_SHARED_DRAFT]: "composer.create_shared_draft",
-  [EDIT_SHARED_DRAFT]: "composer.edit_shared_draft",
-  [ADD_TRANSLATION]: "composer.translations.title",
-};
+import { EDIT } from "discourse/models/composer";
+import DButton from "discourse/ui-kit/d-button";
 
 @tagName("")
 export default class ComposerActionTitle extends Component {
-  @service currentUser;
-  @service siteSettings;
+  @service composer;
 
-  @alias("model.replyOptions") options;
-  @alias("model.action") action;
-
-  // Note we update when some other attributes like tag/category change to allow
-  // text customizations to use those.
-  @discourseComputed("options", "action", "model.tags", "model.category")
-  actionTitle(opts, action) {
-    const result = this.model.customizationFor("actionTitle");
-    if (result) {
-      return result;
-    }
-
-    if (TITLES[action]) {
-      return i18n(TITLES[action]);
-    }
-
-    if (action === REPLY) {
-      if (opts.userAvatar && opts.userLink) {
-        return this._formatReplyToUserPost(opts.userAvatar, opts.userLink);
-      } else if (opts.topicLink) {
-        return this._formatReplyToTopic(opts.topicLink);
-      }
-    }
-
-    if (action === EDIT) {
-      if (opts.userAvatar && opts.userLink && opts.postLink) {
-        return this._formatEditUserPost(
-          opts.userAvatar,
-          opts.userLink,
-          opts.postLink,
-          opts.originalUser
-        );
-      }
-    }
+  @computed("model.replyOptions")
+  get options() {
+    return this.model?.replyOptions;
   }
 
-  @discourseComputed("action")
-  showPostLanguageSelector(action) {
-    const allowedActions = [CREATE_TOPIC, EDIT, REPLY];
+  @computed("model.action", "model.post.can_edit", "model.topic")
+  get canEditReplyTo() {
     return (
-      this.currentUser &&
-      this.siteSettings.content_localization_enabled &&
-      allowedActions.includes(action)
+      this.model?.action === EDIT &&
+      !!this.model?.post?.can_edit &&
+      !!this.model?.topic
     );
   }
 
-  _formatEditUserPost(userAvatar, userLink, postLink, originalUser) {
-    let editTitle = `
-      <a class="post-link" href="${postLink.href}">${postLink.anchor}</a>
-      ${userAvatar}
-      <span class="username">${userLink.anchor}</span>
-    `;
-
-    if (originalUser) {
-      editTitle += `
-        ${iconHTML("share", { class: "reply-to-glyph" })}
-        ${originalUser.avatar}
-        <span class="original-username">${originalUser.username}</span>
-      `;
+  @computed("options.originalUser")
+  get replyTargetSegment() {
+    const originalUser = this.options?.originalUser;
+    if (!originalUser) {
+      return null;
     }
-
-    return htmlSafe(editTitle);
-  }
-
-  _formatReplyToTopic(link) {
-    return htmlSafe(
-      `<a class="topic-link" href="${link.href}" data-topic-id="${this.get(
-        "model.topic.id"
-      )}">${link.anchor}</a>`
+    return trustHTML(
+      `${iconHTML("share", { class: "reply-to-glyph" })}
+       ${originalUser.avatar}
+       <span class="original-username">${escape(originalUser.username)}</span>`
     );
   }
 
-  _formatReplyToUserPost(avatar, link) {
-    const htmlLink = `<a class="user-link" href="${link.href}">${escape(
-      link.anchor
-    )}</a>`;
-    return htmlSafe(`${avatar}${htmlLink}`);
+  @action
+  openChangeReplyToModal() {
+    this.composer.openChangeReplyToModal();
   }
 
   <template>
     <div class="composer-action-title" ...attributes>
-      <ComposerActions
-        @composerModel={{this.model}}
-        @replyOptions={{this.model.replyOptions}}
-        @canWhisper={{this.canWhisper}}
-        @canUnlistTopic={{this.canUnlistTopic}}
-        @action={{this.model.action}}
-        @tabindex={{this.tabindex}}
-        @topic={{this.model.topic}}
-        @post={{this.model.post}}
-        @whisper={{this.model.whisper}}
-        @noBump={{this.model.noBump}}
-        @options={{hash mobilePlacementStrategy="fixed"}}
-      />
-
-      <span class="action-title" role="heading" aria-level="1">
-        {{this.actionTitle}}
-      </span>
-
-      {{#if this.showPostLanguageSelector}}
-        <PostLanguageSelector
+      <span aria-level="1" class="action-title" role="heading">
+        <ComposerActions
+          @action={{this.model.action}}
           @composerModel={{this.model}}
-          @selectedLanguage={{this.model.locale}}
+          @post={{this.model.post}}
+          @replyOptions={{this.model.replyOptions}}
+          @topic={{this.model.topic}}
         />
-      {{/if}}
+
+        {{#if this.replyTargetSegment}}
+          {{#if this.canEditReplyTo}}
+            <DButton
+              class="composer-edit-reply-to btn-default"
+              @action={{this.openChangeReplyToModal}}
+              @title="composer.change_reply_to.open"
+              @translatedLabel={{this.replyTargetSegment}}
+            />
+          {{else}}
+            {{this.replyTargetSegment}}
+          {{/if}}
+        {{/if}}
+      </span>
     </div>
   </template>
 }

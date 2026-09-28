@@ -1,10 +1,8 @@
 # frozen_string_literal: true
 
 describe DiscourseAi::Translation::LanguageDetector do
-  let!(:persona) do
-    AiPersona.find(
-      DiscourseAi::Personas::Persona.system_personas[DiscourseAi::Personas::LocaleDetector],
-    )
+  let!(:agent) do
+    AiAgent.find(DiscourseAi::Agents::Agent.system_agents[DiscourseAi::Agents::LocaleDetector])
   end
 
   before do
@@ -18,7 +16,7 @@ describe DiscourseAi::Translation::LanguageDetector do
     let(:llm_response) { "en-US" }
 
     it "creates the correct prompt" do
-      expected_system_prompt = DiscourseAi::Personas::LocaleDetector.new.system_prompt
+      expected_system_prompt = DiscourseAi::Agents::LocaleDetector.new.system_prompt
 
       allow(DiscourseAi::Completions::Prompt).to receive(:new).with(
         expected_system_prompt,
@@ -64,12 +62,37 @@ describe DiscourseAi::Translation::LanguageDetector do
       end
     end
 
+    it "returns the language when the streamed response has a trailing backslash" do
+      bot = instance_double(DiscourseAi::Agents::Bot)
+      allow(DiscourseAi::Agents::Bot).to receive(:as).and_return(bot)
+      allow(bot).to receive(:reply) { |_, &blk| blk.call("nl\\") }
+
+      expect(locale_detector.detect).to eq("nl")
+    end
+
+    it "returns the language when the streamed response includes thinking" do
+      thinking =
+        DiscourseAi::Completions::Thinking.new(message: "Determining Dutch context", partial: false)
+
+      DiscourseAi::Completions::Llm.with_prepared_responses([[thinking, "nl"]]) do
+        expect(locale_detector.detect).to eq("nl")
+      end
+    end
+
+    it "returns the language when the streamed response has surrounding whitespace" do
+      bot = instance_double(DiscourseAi::Agents::Bot)
+      allow(DiscourseAi::Agents::Bot).to receive(:as).and_return(bot)
+      allow(bot).to receive(:reply) { |_, &blk| blk.call(" nl\n") }
+
+      expect(locale_detector.detect).to eq("nl")
+    end
+
     it "skips detection when provided blank text" do
       blank_detector = described_class.new("    ")
-      allow(AiPersona).to receive(:find_by).and_call_original
+      allow(AiAgent).to receive(:find_by).and_call_original
 
       expect(blank_detector.detect).to eq(nil)
-      expect(AiPersona).not_to have_received(:find_by)
+      expect(AiAgent).not_to have_received(:find_by)
     end
   end
 end

@@ -37,8 +37,8 @@ module(
       await render(
         <template>
           <Form @data={{data}} as |form|>
-            <form.Field @name="image_url" @title="Foo" as |field|>
-              <field.Image @type="site_setting" />
+            <form.Field @name="image_url" @title="Foo" @type="image" as |field|>
+              <field.Control @type="site_setting" />
             </form.Field>
           </Form>
         </template>
@@ -55,8 +55,8 @@ module(
       await render(
         <template>
           <Form @data={{data}} as |form|>
-            <form.Field @name="image_url" @title="Foo" as |field|>
-              <field.Image @type="site_setting" />
+            <form.Field @name="image_url" @title="Foo" @type="image" as |field|>
+              <field.Control @type="site_setting" />
             </form.Field>
 
             <form.Button
@@ -83,12 +83,13 @@ module(
         <template>
           <Form @data={{data}} as |form|>
             <form.Field
+              @disabled={{true}}
               @name="image_url"
               @title="Foo"
-              @disabled={{true}}
+              @type="image"
               as |field|
             >
-              <field.Image @type="site_setting" />
+              <field.Control @type="site_setting" />
             </form.Field>
           </Form>
         </template>
@@ -96,6 +97,23 @@ module(
 
       assert.dom(".file-uploader__controls input[type='file']").isDisabled();
       assert.dom(".file-uploader__controls .btn-danger").isDisabled();
+    });
+
+    test("@placeholderUrl", async function (assert) {
+      await render(
+        <template>
+          <Form as |form|>
+            <form.Field @name="image_url" @title="Foo" @type="image" as |field|>
+              <field.Control
+                @placeholderUrl="/images/avatar.png"
+                @type="site_setting"
+              />
+            </form.Field>
+          </Form>
+        </template>
+      );
+
+      assert.dom(".placeholder-overlay").exists();
     });
   }
 );

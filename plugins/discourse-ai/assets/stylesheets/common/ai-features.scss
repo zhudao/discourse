@@ -43,7 +43,7 @@
   }
 
   &__llm,
-  &__persona,
+  &__agent,
   &__groups {
     font-size: var(--font-down-1-rem);
     display: flex;
@@ -52,11 +52,11 @@
     color: var(--primary-high);
   }
 
-  &__persona {
+  &__agent {
     @include ellipsis;
   }
 
-  &__persona-link,
+  &__agent-link,
   &__llm-link {
     padding: 0;
     margin-right: var(--space-1);
@@ -78,14 +78,6 @@
     flex-flow: row wrap;
     gap: var(--space-1);
     margin: 0;
-
-    li {
-      font-size: var(--font-down-1);
-      border-radius: var(--d-border-radius);
-      background: var(--primary-very-low);
-      border: 1px solid var(--primary-low);
-      padding: 1px 3px;
-    }
   }
 }
 
@@ -130,7 +122,7 @@
     flex: 6 1 auto;
   }
 
-  .d-select {
+  .d-native-select {
     flex: 1 1 auto;
     max-width: 10em;
   }

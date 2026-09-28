@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-describe "Admin Customize Themes Config Area Page", type: :system do
+describe "Admin Customize Themes Config Area Page" do
   fab!(:admin)
   fab!(:parent_theme) { Fabricate(:theme, name: "A theme") }
   fab!(:parent_theme_2) { Fabricate(:theme, name: "B theme") }
@@ -58,7 +58,7 @@ describe "Admin Customize Themes Config Area Page", type: :system do
         enabled: false,
         remote_theme:
           RemoteTheme.create!(
-            remote_url: "https://github.com/discourse/discourse-kanban-theme.git",
+            remote_url: "https://github.com/discourse/discourse-category-banners.git",
             commits_behind: 4,
           ),
       )
@@ -137,7 +137,7 @@ describe "Admin Customize Themes Config Area Page", type: :system do
         "Description of my remote component",
       )
       expect(config_area.component(remote_component_with_update.id)).to have_description(
-        "Display and organize topics using a Kanban board interface.",
+        "Show banners on category pages using your existing category details.",
       )
       expect(config_area.component(remote_component.id)).to be_not_pending_update
 

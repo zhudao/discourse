@@ -29,6 +29,10 @@ export default class AdminConfigAreasAboutExtraGroups extends Component {
     };
   }
 
+  get orderings() {
+    return this.args.extraGroups.aboutPageExtraGroupsOrder.choices;
+  }
+
   @action
   async save(data) {
     this.args.setGlobalSavingStatus(true);
@@ -57,68 +61,68 @@ export default class AdminConfigAreasAboutExtraGroups extends Component {
     }
   }
 
-  get orderings() {
-    return this.args.extraGroups.aboutPageExtraGroupsOrder.choices;
-  }
-
   <template>
     <Form @data={{this.data}} @onSubmit={{this.save}} as |form|>
       <form.Field
+        @format="large"
         @name="aboutPageExtraGroups"
         @title={{i18n "admin.config_areas.about.extra_groups.groups"}}
-        @format="large"
+        @type="custom"
         as |field|
       >
-        <field.Custom>
+        <field.Control>
           <GroupChooser
             @content={{this.site.groups}}
-            @value={{field.value}}
             @onChange={{field.set}}
+            @value={{field.value}}
           />
-        </field.Custom>
+        </field.Control>
       </form.Field>
 
       <form.Field
-        @name="aboutPageExtraGroupsInitialMembers"
-        @title={{i18n "admin.config_areas.about.extra_groups.initial_members"}}
         @description={{i18n
           "admin.config_areas.about.extra_groups.initial_members_description"
         }}
-        @validation="required"
         @format="large"
+        @name="aboutPageExtraGroupsInitialMembers"
+        @title={{i18n "admin.config_areas.about.extra_groups.initial_members"}}
+        @type="input-number"
+        @validation="required"
         as |field|
       >
-        <field.Input @type="number" />
+        <field.Control />
       </form.Field>
 
       <form.Field
+        @format="large"
         @name="aboutPageExtraGroupsOrder"
         @title={{i18n "admin.config_areas.about.extra_groups.order"}}
+        @type="select"
         @validation="required"
-        @format="large"
         as |field|
       >
-        <field.Select as |select|>
+        <field.Control as |select|>
           {{#each this.orderings as |ordering|}}
             <select.Option @value={{ordering}}>
               {{ordering}}
             </select.Option>
           {{/each}}
-        </field.Select>
+        </field.Control>
       </form.Field>
 
       <form.Field
+        @format="large"
         @name="aboutPageExtraGroupsShowDescription"
         @title={{i18n "admin.config_areas.about.extra_groups.show_description"}}
-        @format="large"
+        @type="checkbox"
         as |field|
       >
-        <field.Checkbox />
+        <field.Control />
       </form.Field>
 
       <form.Submit
-        @label="admin.config_areas.about.update"
         @disabled={{@globalSavingStatus}}
+        @label="admin.config_areas.about.update"
       />
     </Form>
   </template>

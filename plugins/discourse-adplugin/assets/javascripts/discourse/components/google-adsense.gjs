@@ -1,11 +1,11 @@
+import { computed } from "@ember/object";
 import { scheduleOnce } from "@ember/runloop";
-import { htmlSafe } from "@ember/template";
+import { trustHTML } from "@ember/template";
 import { tagName } from "@ember-decorators/component";
 import RSVP from "rsvp";
-import concatClass from "discourse/helpers/concat-class";
-import discourseComputed from "discourse/lib/decorators";
 import { isTesting } from "discourse/lib/environment";
 import loadScript from "discourse/lib/load-script";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
 import { i18n } from "discourse-i18n";
 import AdComponent from "./ad-component";
 
@@ -63,6 +63,10 @@ function loadAdsense() {
 }
 
 const DESKTOP_SETTINGS = {
+  "above-site-header": {
+    code: "adsense_above_site_header_code",
+    sizes: "adsense_above_site_header_ad_sizes",
+  },
   "topic-list-top": {
     code: "adsense_topic_list_top_code",
     sizes: "adsense_topic_list_top_ad_sizes",
@@ -82,6 +86,10 @@ const DESKTOP_SETTINGS = {
 };
 
 const MOBILE_SETTINGS = {
+  "above-site-header": {
+    code: "adsense_mobile_above_site_header_code",
+    sizes: "adsense_mobile_above_site_header_ad_size",
+  },
   "topic-list-top": {
     code: "adsense_mobile_topic_list_top_code",
     sizes: "adsense_mobile_topic_list_top_ad_size",
@@ -138,6 +146,101 @@ export default class GoogleAdsense extends AdComponent {
     super.init();
   }
 
+  @computed("ad_width")
+  get isResponsive() {
+    return ["auto", "fluid"].includes(this.ad_width);
+  }
+
+  @computed("ad_width")
+  get isFluid() {
+    return this.ad_width === "fluid";
+  }
+
+  @computed("placement", "showAd")
+  get classForSlot() {
+    return this.showAd ? trustHTML(`adsense-${this.placement}`) : "";
+  }
+
+  @computed("isResponsive", "isFluid")
+  get autoAdFormat() {
+    return this.isResponsive
+      ? trustHTML(this.isFluid ? "fluid" : "auto")
+      : false;
+  }
+
+  @computed("ad_width", "ad_height", "isResponsive")
+  get adWrapperStyle() {
+    return trustHTML(
+      this.isResponsive
+        ? ""
+        : `width: ${this.ad_width}; height: ${this.ad_height};`
+    );
+  }
+
+  @computed("adWrapperStyle", "isResponsive")
+  get adInsStyle() {
+    return trustHTML(
+      `display: ${this.isResponsive ? "block" : "inline-block"}; ${this.adWrapperStyle}`
+    );
+  }
+
+  @computed
+  get showAdsenseAds() {
+    if (!this.currentUser) {
+      return true;
+    }
+
+    return this.currentUser.show_adsense_ads;
+  }
+
+  @computed(
+    "publisher_id",
+    "showAdsenseAds",
+    "showToGroups",
+    "showAfterPost",
+    "showOnCurrentPage"
+  )
+  get showAd() {
+    return (
+      this.publisher_id &&
+      this.showAdsenseAds &&
+      this.showToGroups &&
+      this.showAfterPost &&
+      this.showOnCurrentPage
+    );
+  }
+
+  @computed("postNumber")
+  get showAfterPost() {
+    if (!this.postNumber) {
+      return true;
+    }
+
+    return this.isNthPost(
+      parseInt(this.siteSettings.adsense_nth_post_code, 10)
+    );
+  }
+
+  didInsertElement() {
+    super.didInsertElement();
+
+    if (!this.get("showAd")) {
+      return;
+    }
+
+    scheduleOnce("afterRender", this, this._triggerAds);
+  }
+
+  buildImpressionPayload() {
+    return {
+      ad_plugin_impression: {
+        ad_type: this.site.ad_types.adsense,
+        ad_plugin_house_ad_id: null,
+        placement: this.placement,
+      },
+    };
+  }
+
   async _triggerAds() {
     if (isTesting()) {
       return; // Don't load external JS during tests
@@ -147,7 +250,7 @@ export default class GoogleAdsense extends AdComponent {
 
     await loadAdsense();
 
-    if (this.isDestroyed || this.isDestroying) {
+    if (this.isDestroying) {
       // Component removed from DOM before script loaded
       return;
     }
@@ -161,104 +264,9 @@ export default class GoogleAdsense extends AdComponent {
     }
   }
 
-  didInsertElement() {
-    super.didInsertElement();
-
-    if (!this.get("showAd")) {
-      return;
-    }
-
-    scheduleOnce("afterRender", this, this._triggerAds);
-  }
-
-  @discourseComputed("ad_width")
-  isResponsive(adWidth) {
-    return ["auto", "fluid"].includes(adWidth);
-  }
-
-  @discourseComputed("ad_width")
-  isFluid(adWidth) {
-    return adWidth === "fluid";
-  }
-
-  @discourseComputed("placement", "showAd")
-  classForSlot(placement, showAd) {
-    return showAd ? htmlSafe(`adsense-${placement}`) : "";
-  }
-
-  @discourseComputed("isResponsive", "isFluid")
-  autoAdFormat(isResponsive, isFluid) {
-    return isResponsive ? htmlSafe(isFluid ? "fluid" : "auto") : false;
-  }
-
-  @discourseComputed("ad_width", "ad_height", "isResponsive")
-  adWrapperStyle(w, h, isResponsive) {
-    return htmlSafe(isResponsive ? "" : `width: ${w}; height: ${h};`);
-  }
-
-  @discourseComputed("adWrapperStyle", "isResponsive")
-  adInsStyle(adWrapperStyle, isResponsive) {
-    return htmlSafe(
-      `display: ${isResponsive ? "block" : "inline-block"}; ${adWrapperStyle}`
-    );
-  }
-
-  @discourseComputed
-  showAdsenseAds() {
-    if (!this.currentUser) {
-      return true;
-    }
-
-    return this.currentUser.show_adsense_ads;
-  }
-
-  @discourseComputed(
-    "publisher_id",
-    "showAdsenseAds",
-    "showToGroups",
-    "showAfterPost",
-    "showOnCurrentPage"
-  )
-  showAd(
-    publisherId,
-    showAdsenseAds,
-    showToGroups,
-    showAfterPost,
-    showOnCurrentPage
-  ) {
-    return (
-      publisherId &&
-      showAdsenseAds &&
-      showToGroups &&
-      showAfterPost &&
-      showOnCurrentPage
-    );
-  }
-
-  @discourseComputed("postNumber")
-  showAfterPost(postNumber) {
-    if (!postNumber) {
-      return true;
-    }
-
-    return this.isNthPost(
-      parseInt(this.siteSettings.adsense_nth_post_code, 10)
-    );
-  }
-
-  buildImpressionPayload() {
-    return {
-      ad_plugin_impression: {
-        ad_type: this.site.ad_types.adsense,
-        ad_plugin_house_ad_id: null,
-        placement: this.placement,
-      },
-    };
-  }
-
   <template>
     <div
-      class={{concatClass
+      class={{dConcatClass
         "google-adsense"
         this.classForSlot
         (if this.isResponsive "adsense-responsive")
@@ -276,10 +284,10 @@ export default class GoogleAdsense extends AdComponent {
         >
           <ins
             class="adsbygoogle"
-            style={{this.adInsStyle}}
             data-ad-client="ca-pub-{{this.publisher_id}}"
-            data-ad-slot={{this.ad_code}}
             data-ad-format={{this.autoAdFormat}}
+            data-ad-slot={{this.ad_code}}
+            style={{this.adInsStyle}}
           >
           </ins>
         </div>

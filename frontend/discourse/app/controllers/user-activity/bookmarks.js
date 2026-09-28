@@ -1,12 +1,12 @@
 import Controller, { inject as controller } from "@ember/controller";
 import EmberObject, { action, computed } from "@ember/object";
-import { equal, notEmpty } from "@ember/object/computed";
+import { dependentKeyCompat } from "@ember/object/compat";
 import { service } from "@ember/service";
-import { htmlSafe } from "@ember/template";
+import { trustHTML } from "@ember/template";
+import { isEmpty } from "@ember/utils";
 import { Promise } from "rsvp";
 import { ajax } from "discourse/lib/ajax";
 import BulkSelectHelper from "discourse/lib/bulk-select-helper";
-import discourseComputed from "discourse/lib/decorators";
 import { iconHTML } from "discourse/lib/icon-library";
 import Bookmark from "discourse/models/bookmark";
 import { i18n } from "discourse-i18n";
@@ -25,9 +25,6 @@ export default class UserActivityBookmarksController extends Controller {
 
   bulkSelectHelper = new BulkSelectHelper(this);
 
-  @notEmpty("q") inSearchMode;
-  @equal("model.bookmarks.length", 0) noContent;
-
   @computed("q")
   get searchTerm() {
     return this._searchTerm !== undefined ? this._searchTerm : this.q;
@@ -37,23 +34,33 @@ export default class UserActivityBookmarksController extends Controller {
     this._searchTerm = value;
   }
 
-  @discourseComputed()
-  emptyStateBody() {
-    return htmlSafe(
+  @computed("q")
+  get inSearchMode() {
+    return !isEmpty(this.q);
+  }
+
+  @dependentKeyCompat
+  get noContent() {
+    return this.model?.bookmarks?.length === 0;
+  }
+
+  @computed()
+  get emptyStateBody() {
+    return trustHTML(
       i18n("user.no_bookmarks_body", {
         icon: iconHTML("bookmark"),
       })
     );
   }
 
-  @discourseComputed("inSearchMode", "noContent")
-  userDoesNotHaveBookmarks(inSearchMode, noContent) {
-    return !inSearchMode && noContent;
+  @computed("inSearchMode", "noContent")
+  get userDoesNotHaveBookmarks() {
+    return !this.inSearchMode && this.noContent;
   }
 
-  @discourseComputed("inSearchMode", "noContent")
-  nothingFound(inSearchMode, noContent) {
-    return inSearchMode && noContent;
+  @computed("inSearchMode", "noContent")
+  get nothingFound() {
+    return this.inSearchMode && this.noContent;
   }
 
   @action
@@ -85,6 +92,19 @@ export default class UserActivityBookmarksController extends Controller {
   @action
   updateAutoAddBookmarksToBulkSelect(value) {
     this.bulkSelectHelper.autoAddBookmarksToBulkSelect = value;
+  }
+
+  transform(bookmark) {
+    const bookmarkModel = Bookmark.create(bookmark);
+    bookmarkModel.topicStatus = EmberObject.create({
+      closed: bookmark.closed,
+      archived: bookmark.archived,
+      is_warning: bookmark.is_warning,
+      pinned: false,
+      unpinned: false,
+      invisible: bookmark.invisible,
+    });
+    return bookmarkModel;
   }
 
   _loadMoreBookmarks(searchQuery) {
@@ -122,18 +142,5 @@ export default class UserActivityBookmarksController extends Controller {
       this.model.bookmarks.push(...bookmarkModels);
       this.session.set("bookmarksModel", this.model);
     }
-  }
-
-  transform(bookmark) {
-    const bookmarkModel = Bookmark.create(bookmark);
-    bookmarkModel.topicStatus = EmberObject.create({
-      closed: bookmark.closed,
-      archived: bookmark.archived,
-      is_warning: bookmark.is_warning,
-      pinned: false,
-      unpinned: false,
-      invisible: bookmark.invisible,
-    });
-    return bookmarkModel;
   }
 }

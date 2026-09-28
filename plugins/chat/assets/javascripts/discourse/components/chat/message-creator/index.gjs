@@ -1,15 +1,15 @@
 import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";
-import { trackedArray } from "discourse/lib/tracked-tools";
+import { autoTrackedArray } from "discourse/lib/tracked-tools";
 import AddMembers from "./add-members";
 import { MODES } from "./constants";
 import NewGroup from "./new-group";
 import Search from "./search";
 
 export default class ChatMessageCreator extends Component {
-  @tracked mode = MODES.search;
-  @trackedArray members = [];
+  @tracked mode = this.args.initialMode ?? MODES.search;
+  @autoTrackedArray members = [];
 
   get componentForMode() {
     switch (this.args.mode ?? this.mode) {
@@ -42,12 +42,12 @@ export default class ChatMessageCreator extends Component {
     <div class="chat-message-creator-container">
       <div class="chat-message-creator">
         <this.componentForMode
-          @channel={{@channel}}
-          @onChangeMode={{this.changeMode}}
-          @onChangeMembers={{this.changeMembers}}
-          @close={{@onClose}}
           @cancel={{this.cancelAction}}
+          @channel={{@channel}}
+          @close={{@onClose}}
           @members={{this.members}}
+          @onChangeMembers={{this.changeMembers}}
+          @onChangeMode={{this.changeMode}}
         />
       </div>
     </div>

@@ -1,8 +1,7 @@
 import Controller from "@ember/controller";
-import EmberObject, { action } from "@ember/object";
+import EmberObject, { action, computed } from "@ember/object";
 import { scheduleOnce } from "@ember/runloop";
 import { service } from "@ember/service";
-import discourseComputed from "discourse/lib/decorators";
 import { exportEntity } from "discourse/lib/export-csv";
 import { outputExportResult } from "discourse/lib/export-result";
 import { i18n } from "discourse-i18n";
@@ -17,47 +16,28 @@ export default class AdminLogsStaffActionLogsController extends Controller {
   model = null;
   filters = null;
   userHistoryActions = null;
+
   /** @type {moment.Moment | null} */
   startDate = null;
+
   /** @type {moment.Moment | null} */
   endDate = null;
 
-  @discourseComputed("filters.action_name")
-  actionFilter(name) {
-    return name ? i18n("admin.logs.staff_actions.actions." + name) : null;
+  @computed("model")
+  get initialModelLoading() {
+    return !this.model?.content;
   }
 
-  @discourseComputed("filters")
-  filtersExists(filters) {
-    return filters && Object.keys(filters).length > 0;
+  @computed("filters.action_name")
+  get actionFilter() {
+    return this.filters?.action_name
+      ? i18n("admin.logs.staff_actions.actions." + this.filters?.action_name)
+      : null;
   }
 
-  _refresh() {
-    this.store
-      .findAll("staff-action-log", {
-        ...this.filters,
-        start_date: this.startDate?.toISOString(),
-        end_date: this.endDate?.toISOString(),
-      })
-      .then((result) => {
-        this.set("model", result);
-
-        if (!this.userHistoryActions) {
-          this.set(
-            "userHistoryActions",
-            result.extras.user_history_actions
-              .map((historyAction) => ({
-                id: historyAction.id,
-                action_id: historyAction.action_id,
-                name: i18n(
-                  "admin.logs.staff_actions.actions." + historyAction.id
-                ),
-                name_raw: historyAction.id,
-              }))
-              .sort((a, b) => a.name.localeCompare(b.name))
-          );
-        }
-      });
+  @computed("filters")
+  get filtersExists() {
+    return this.filters && Object.keys(this.filters).length > 0;
   }
 
   scheduleRefresh() {
@@ -203,5 +183,33 @@ export default class AdminLogsStaffActionLogsController extends Controller {
     this.set("endDate", to);
     this.set("model", EmberObject.create({ loadingMore: true }));
     this.scheduleRefresh();
+  }
+
+  _refresh() {
+    this.store
+      .findAll("staff-action-log", {
+        ...this.filters,
+        start_date: this.startDate?.toISOString(),
+        end_date: this.endDate?.toISOString(),
+      })
+      .then((result) => {
+        this.set("model", result);
+
+        if (!this.userHistoryActions) {
+          this.set(
+            "userHistoryActions",
+            result.extras.user_history_actions
+              .map((historyAction) => ({
+                id: historyAction.id,
+                action_id: historyAction.action_id,
+                name: i18n(
+                  "admin.logs.staff_actions.actions." + historyAction.id
+                ),
+                name_raw: historyAction.id,
+              }))
+              .sort((a, b) => a.name.localeCompare(b.name))
+          );
+        }
+      });
   }
 }

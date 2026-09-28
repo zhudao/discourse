@@ -3,6 +3,8 @@
 class UpcomingChanges::List
   include Service::Base
 
+  options { attribute :filter_statuses, :array, default: [] }
+
   policy :current_user_is_admin
   model :upcoming_changes, optional: true
   step :load_upcoming_change_groups
@@ -15,13 +17,24 @@ class UpcomingChanges::List
     guardian.is_admin?
   end
 
-  def fetch_upcoming_changes
+  def fetch_upcoming_changes(options:)
     SiteSetting
       .all_settings(
         only_upcoming_changes: true,
         include_hidden: true,
         include_locale_setting: false,
       )
+      .select do |setting|
+        if options.filter_statuses.any?
+          options
+            .filter_statuses
+            .map(&:to_sym)
+            .include?(UpcomingChanges.change_status(setting[:setting]))
+        else
+          true
+        end
+      end
+      .select { |setting| UpcomingChanges::ConditionalDisplay.should_display?(setting[:setting]) }
       .each do |setting|
         setting[:value] = setting[:value] == "true"
 
@@ -47,39 +60,38 @@ class UpcomingChanges::List
           :value,
           :upcoming_change,
           :plugin,
+          :depends_on,
+          :depends_on_humanized_names,
         ).merge(
-          dependents: SiteSetting.type_supervisor.dependencies.dependents(setting[:setting].to_s),
+          dependents: UpcomingChanges.find_dependents_for_change(setting[:setting]),
+          depends_on_met: UpcomingChanges.change_dependencies_met?(setting[:setting]),
+          overriding_defaults:
+            SiteSetting.upcoming_change_default_overrides.values.any? do |override|
+              override[:upcoming_change] == setting[:setting]
+            end,
         )
       end
   end
 
   def load_upcoming_change_groups(upcoming_changes:)
     group_ids =
-      upcoming_changes
-        .map { |change| SiteSetting.site_setting_group_ids[change[:setting]] }
-        .flatten
-        .compact
-        .uniq
-
+      (
+        upcoming_changes.flat_map do |change|
+          SiteSetting.site_setting_group_ids[change[:setting]]
+        end + [Group::AUTO_GROUPS[:staff]]
+      ).compact.uniq
     groups = Group.where(id: group_ids).pluck(:id, :name).to_h
 
     upcoming_changes.each do |setting|
-      group_ids_for_setting = SiteSetting.site_setting_group_ids[setting[:setting]]
-      setting[:groups] = groups.values_at(*group_ids_for_setting).join(
-        ",",
-      ) if group_ids_for_setting.present?
+      enabled_for, setting_groups =
+        UpcomingChanges.enabled_for_with_groups(
+          setting[:setting],
+          setting[:value],
+          groups,
+        ).values_at(:enabled_for, :setting_groups)
 
-      setting[:upcoming_change][:enabled_for] = if !setting[:value]
-        "no_one"
-      elsif setting[:groups].blank?
-        "everyone"
-      else
-        if group_ids_for_setting == [Group::AUTO_GROUPS[:staff]]
-          "staff"
-        else
-          "groups"
-        end
-      end
+      setting[:upcoming_change][:enabled_for] = enabled_for
+      setting[:groups] = setting_groups
     end
   end
 

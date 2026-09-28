@@ -1,6 +1,6 @@
 import { action } from "@ember/object";
 import Service, { service } from "@ember/service";
-import { htmlSafe } from "@ember/template";
+import { trustHTML } from "@ember/template";
 import { Promise } from "rsvp";
 import DeleteUserPostsProgressModal from "discourse/admin/components/modal/delete-user-posts-progress";
 import PenalizeUserModal from "discourse/admin/components/modal/penalize-user";
@@ -16,6 +16,31 @@ export default class AdminToolsService extends Service {
   @service modal;
   @service router;
 
+  get deleteUserOptions() {
+    return [
+      {
+        id: "delete_dont_block",
+        label: i18n("admin.user.delete_dont_block"),
+        description: i18n("admin.user.delete_dont_block_description"),
+        icon: "trash-can",
+      },
+      {
+        id: "delete_and_block_email",
+        label: i18n("admin.user.delete_and_block_email"),
+        description: i18n("admin.user.delete_and_block_email_description"),
+        icon: "envelope",
+        blockFlags: { block_email: true },
+      },
+      {
+        id: "delete_and_block",
+        label: i18n("admin.user.delete_and_block"),
+        description: i18n("admin.user.delete_and_block_description"),
+        icon: "ban",
+        blockFlags: { block_email: true, block_urls: true, block_ip: true },
+      },
+    ];
+  }
+
   showActionLogs(target, filters) {
     this.router.transitionTo("adminLogs.staffActionLogs", {
       queryParams: { filters, force_refresh: true },
@@ -28,6 +53,45 @@ export default class AdminToolsService extends Service {
 
   deleteUser(id, formData) {
     return AdminUser.find(id).then((user) => user.destroy(formData));
+  }
+
+  showDeleteUserModal(
+    userId,
+    optionId,
+    { deletePosts = false, onDeleted } = {}
+  ) {
+    const option = this.deleteUserOptions.find((o) => o.id === optionId);
+    const blockFlags = option?.blockFlags ?? {};
+    const block = Object.keys(blockFlags).length > 0;
+
+    this.dialog.deleteConfirm({
+      title: i18n("admin.user.delete_confirm_title"),
+      message: i18n("admin.user.delete_confirm"),
+      class: `delete-user-modal ${
+        block ? "delete-and-block" : "delete-dont-block"
+      }`,
+      confirmButtonLabel: `admin.user.${optionId}`,
+      confirmButtonIcon: block ? "triangle-exclamation" : "trash-can",
+      didConfirm: async () => {
+        this.dialog.notice(i18n("admin.user.deleting_user"));
+
+        const formData = { context: document.location.pathname, ...blockFlags };
+        if (deletePosts) {
+          formData.delete_posts = true;
+        }
+
+        try {
+          const data = await this.deleteUser(userId, formData);
+          if (data?.deleted) {
+            onDeleted?.();
+          } else {
+            this.dialog.alert(i18n("admin.user.delete_failed"));
+          }
+        } catch {
+          this.dialog.alert(i18n("admin.user.delete_failed"));
+        }
+      },
+    });
   }
 
   spammerDetails(adminUser) {
@@ -51,6 +115,7 @@ export default class AdminToolsService extends Service {
         penaltyType: type,
         postId: opts.postId,
         postEdit: opts.postEdit,
+        reviewableId: opts.reviewableId,
         user: loadedUser,
         before: opts.before,
         successCallback: async (result) => {
@@ -74,6 +139,34 @@ export default class AdminToolsService extends Service {
     return this.showControlModal("suspend", user, opts);
   }
 
+  async deletePostsDecider(user) {
+    const response = await ajax(
+      `/admin/users/${user.id}/delete_posts_decider`,
+      {
+        type: "POST",
+      }
+    );
+
+    if (response.job_enqueued) {
+      this.dialog.alert(
+        i18n("admin.user.delete_posts.all_enqueued", {
+          username: user.username,
+        })
+      );
+      this.modal.close();
+      return;
+    }
+
+    this.modal.show(DeleteUserPostsProgressModal, {
+      model: {
+        user,
+        updateUserPostCount(count) {
+          user.set("post_count", count);
+        },
+      },
+    });
+  }
+
   _deleteSpammer(adminUser) {
     // Try loading the email if the site supports it
     let tryEmail = this.siteSettings.moderators_view_emails
@@ -81,7 +174,7 @@ export default class AdminToolsService extends Service {
       : Promise.resolve();
 
     return tryEmail.then(() => {
-      let message = htmlSafe(
+      let message = trustHTML(
         I18n.messageFormat("flagging.delete_confirm_MF", {
           POSTS: adminUser.get("post_count"),
           TOPICS: adminUser.get("topic_count"),
@@ -126,34 +219,6 @@ export default class AdminToolsService extends Service {
           },
         });
       });
-    });
-  }
-
-  async deletePostsDecider(user) {
-    const response = await ajax(
-      `/admin/users/${user.id}/delete_posts_decider`,
-      {
-        type: "POST",
-      }
-    );
-
-    if (response.job_enqueued) {
-      this.dialog.alert(
-        i18n("admin.user.delete_posts.all_enqueued", {
-          username: user.username,
-        })
-      );
-      this.modal.close();
-      return;
-    }
-
-    this.modal.show(DeleteUserPostsProgressModal, {
-      model: {
-        user,
-        updateUserPostCount(count) {
-          user.set("post_count", count);
-        },
-      },
     });
   }
 }

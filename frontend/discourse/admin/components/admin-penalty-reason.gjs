@@ -1,13 +1,11 @@
 /* eslint-disable ember/no-classic-components */
 import Component, { Textarea } from "@ember/component";
-import { action } from "@ember/object";
-import { equal } from "@ember/object/computed";
-import { htmlSafe } from "@ember/template";
+import { action, computed } from "@ember/object";
+import { trustHTML } from "@ember/template";
 import { tagName } from "@ember-decorators/component";
-import TextField from "discourse/components/text-field";
-import discourseComputed from "discourse/lib/decorators";
 import ComboBox from "discourse/select-kit/components/combo-box";
 import { eq } from "discourse/truth-helpers";
+import DTextField from "discourse/ui-kit/d-text-field";
 import { i18n } from "discourse-i18n";
 
 const CUSTOM_REASON_KEY = "custom";
@@ -26,11 +24,14 @@ export default class AdminPenaltyReason extends Component {
     CUSTOM_REASON_KEY,
   ];
 
-  @equal("selectedReason", CUSTOM_REASON_KEY) isCustomReason;
+  @computed("selectedReason")
+  get isCustomReason() {
+    return this.selectedReason === CUSTOM_REASON_KEY;
+  }
 
-  @discourseComputed("reasonKeys")
-  reasons(keys) {
-    return keys.map((key) => {
+  @computed("reasonKeys")
+  get reasons() {
+    return this.reasonKeys.map((key) => {
       return { id: key, name: i18n(`admin.user.suspend_reasons.${key}`) };
     });
   }
@@ -65,36 +66,36 @@ export default class AdminPenaltyReason extends Component {
             "admin.user.suspend_reason_title"
           }}</label>
         <ComboBox
-          @content={{this.reasons}}
-          @value={{this.selectedReason}}
-          @onChange={{this.setSelectedReason}}
           class="suspend-reason"
+          @content={{this.reasons}}
+          @onChange={{this.setSelectedReason}}
+          @value={{this.selectedReason}}
         />
 
         {{#if this.isCustomReason}}
-          <TextField
-            @value={{this.customReason}}
-            @onChange={{this.setCustomReason}}
+          <DTextField
             class="suspend-reason"
+            @onChange={{this.setCustomReason}}
+            @value={{this.customReason}}
           />
         {{/if}}
       {{else if (eq @penaltyType "silence")}}
         <label class="silence-reason-title">
-          {{htmlSafe (i18n "admin.user.silence_reason_label")}}</label>
+          {{trustHTML (i18n "admin.user.silence_reason_label")}}</label>
 
         <ComboBox
-          @content={{this.reasons}}
-          @value={{this.selectedReason}}
-          @onChange={{this.setSelectedReason}}
           class="silence-reason"
+          @content={{this.reasons}}
+          @onChange={{this.setSelectedReason}}
+          @value={{this.selectedReason}}
         />
 
         {{#if this.isCustomReason}}
-          <TextField
-            @value={{this.customReason}}
+          <DTextField
+            class="silence-reason"
             @onChange={{this.setCustomReason}}
             @placeholderKey="admin.user.silence_reason_placeholder"
-            class="silence-reason"
+            @value={{this.customReason}}
           />
         {{/if}}
       {{/if}}
@@ -103,9 +104,9 @@ export default class AdminPenaltyReason extends Component {
     <div class="penalty-message-controls">
       <label>{{i18n "admin.user.suspend_message"}}</label>
       <Textarea
-        @value={{this.message}}
         class="suspend-message"
         placeholder={{i18n "admin.user.suspend_message_placeholder"}}
+        @value={{this.message}}
       />
     </div>
   </template>

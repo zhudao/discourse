@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-RSpec.describe "AI Bot - Header Toggle", type: :system do
+RSpec.describe "AI Bot - Header Toggle" do
   let(:topic_page) { PageObjects::Pages::Topic.new }
   let(:ai_pm_homepage) { PageObjects::Components::AiPmHomepage.new }
   let(:header) { PageObjects::Pages::DiscourseAi::Header.new }
@@ -23,8 +23,8 @@ RSpec.describe "AI Bot - Header Toggle", type: :system do
     group.add(user)
     group.save
 
-    allowed_persona = AiPersona.last
-    allowed_persona.update!(allowed_group_ids: [group.id], enabled: true)
+    allowed_agent = AiAgent.last
+    allowed_agent.update!(allowed_group_ids: [group.id], enabled: true)
 
     sign_in(user)
   end
@@ -37,7 +37,7 @@ RSpec.describe "AI Bot - Header Toggle", type: :system do
     expect(header).to have_icon_in_bot_button(icon: "shuffle")
 
     header.click_bot_button
-    expect(header).to have_icon_in_bot_button(icon: "robot")
+    expect(header).to have_icon_in_bot_button(icon: "far-discobot")
     expect(page).to have_current_path("/hot")
   end
 
@@ -48,7 +48,7 @@ RSpec.describe "AI Bot - Header Toggle", type: :system do
     expect(ai_pm_homepage).to have_homepage
 
     header.click_bot_button
-    expect(header).to have_icon_in_bot_button(icon: "robot")
+    expect(header).to have_icon_in_bot_button(icon: "far-discobot")
     expect(page).to have_current_path("/hot")
 
     visit "/categories"
@@ -58,7 +58,7 @@ RSpec.describe "AI Bot - Header Toggle", type: :system do
     expect(ai_pm_homepage).to have_homepage
 
     header.click_bot_button
-    expect(header).to have_icon_in_bot_button(icon: "robot")
+    expect(header).to have_icon_in_bot_button(icon: "far-discobot")
     expect(page).to have_current_path("/categories")
   end
 end

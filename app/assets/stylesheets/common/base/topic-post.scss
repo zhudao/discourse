@@ -111,7 +111,7 @@
 .cooked,
 .d-editor-preview {
   overflow-wrap: break-word;
-  line-height: 1.5;
+  line-height: var(--cooked-line-height);
 
   video {
     max-width: 100%;
@@ -144,40 +144,7 @@
     margin: 2rem 0 0.67rem;
     line-height: var(--line-height-medium);
 
-    a.anchor {
-      opacity: 0;
-      transition: opacity 0.25s;
-
-      &:focus-visible {
-        outline: 0;
-        opacity: 1;
-      }
-
-      &::before {
-        content: svg-uri(
-          '<svg xmlns="http://www.w3.org/2000/svg" width="16px" height="16px" viewBox="0 0 512 512" fill="#{$primary-medium}"><path d="M326.612 185.391c59.747 59.809 58.927 155.698.36 214.59-.11.12-.24.25-.36.37l-67.2 67.2c-59.27 59.27-155.699 59.262-214.96 0-59.27-59.26-59.27-155.7 0-214.96l37.106-37.106c9.84-9.84 26.786-3.3 27.294 10.606.648 17.722 3.826 35.527 9.69 52.721 1.986 5.822.567 12.262-3.783 16.612l-13.087 13.087c-28.026 28.026-28.905 73.66-1.155 101.96 28.024 28.579 74.086 28.749 102.325.51l67.2-67.19c28.191-28.191 28.073-73.757 0-101.83-3.701-3.694-7.429-6.564-10.341-8.569a16.037 16.037 0 0 1-6.947-12.606c-.396-10.567 3.348-21.456 11.698-29.806l21.054-21.055c5.521-5.521 14.182-6.199 20.584-1.731a152.482 152.482 0 0 1 20.522 17.197zM467.547 44.449c-59.261-59.262-155.69-59.27-214.96 0l-67.2 67.2c-.12.12-.25.25-.36.37-58.566 58.892-59.387 154.781.36 214.59a152.454 152.454 0 0 0 20.521 17.196c6.402 4.468 15.064 3.789 20.584-1.731l21.054-21.055c8.35-8.35 12.094-19.239 11.698-29.806a16.037 16.037 0 0 0-6.947-12.606c-2.912-2.005-6.64-4.875-10.341-8.569-28.073-28.073-28.191-73.639 0-101.83l67.2-67.19c28.239-28.239 74.3-28.069 102.325.51 27.75 28.3 26.872 73.934-1.155 101.96l-13.087 13.087c-4.35 4.35-5.769 10.79-3.783 16.612 5.864 17.194 9.042 34.999 9.69 52.721.509 13.906 17.454 20.446 27.294 10.606l37.106-37.106c59.271-59.259 59.271-155.699.001-214.959z"></path></svg>'
-        );
-        line-height: 1.4;
-        margin-left: -20px;
-        padding-right: 4px;
-        position: absolute;
-        z-index: 2;
-      }
-    }
-
-    // the anchor icon is a CSS pseudo element set above
-    // so we can't change the color of the icon itself
-    // but we can change the color of the anchor text
-    &:has(a.anchor:focus-visible) {
-      color: var(--tertiary);
-    }
-
-    // show when hovering where icon should be
-    // show when hovering header
-    .discourse-no-touch & a.anchor:hover,
-    .discourse-no-touch &:hover a.anchor {
-      opacity: 1;
-    }
+    @extend %heading-anchor;
   }
 
   h1 {
@@ -415,9 +382,7 @@ nav.post-controls {
   .fade-out {
     .discourse-no-touch & {
       opacity: 0.7;
-      transition:
-        background 0.25s,
-        opacity 0.7s ease-in-out;
+      transition: opacity 0.7s ease-in-out;
     }
 
     .discourse-touch & {
@@ -448,11 +413,26 @@ nav.post-controls {
       gap: var(--space-1);
     }
 
-    .post-action-menu__double-button {
-      .discourse-no-touch & {
-        &:not(.has-liked):hover {
-          --d-post-control-background--hover: var(--love-low);
-          --d-button-flat-icon-color--hover: var(--love);
+    .post-action-menu {
+      &__like {
+        &.has-like .d-icon {
+          color: var(--love);
+        }
+
+        .discourse-no-touch & {
+          &:not(.has-like):hover {
+            --d-post-control-background--hover: var(--love-low);
+            --d-button-flat-icon-color--hover: var(--love);
+          }
+        }
+      }
+
+      &__double-button {
+        .discourse-no-touch & {
+          &:not(.has-liked):hover {
+            --d-post-control-background--hover: var(--love-low);
+            --d-button-flat-icon-color--hover: var(--love);
+          }
         }
       }
     }
@@ -559,17 +539,6 @@ nav.post-controls {
     }
 
     button {
-      &.expand-post {
-        @include viewport.until(sm) {
-          margin: var(--control-space) 0 var(--control-space) 0;
-        }
-
-        @include viewport.from(sm) {
-          margin-top: var(--space-3);
-          margin-left: var(--topic-body-width-padding);
-        }
-      }
-
       .discourse-no-touch & {
         &:hover,
         &:focus-visible,
@@ -613,23 +582,38 @@ nav.post-controls {
     }
   }
 
+  .post-action-menu__like-count {
+    display: inline-flex;
+    align-items: center;
+    color: var(--d-post-control-text-color) !important;
+    gap: var(--space-2);
+
+    &.has-liked .d-icon {
+      color: var(--danger);
+    }
+  }
+
   .btn.show-replies {
+    --border-width: 1px;
     font-size: inherit;
-    padding: 10px;
     color: var(--primary-medium);
     display: flex;
     align-items: center;
     border-radius: var(--d-button-border-radius);
 
-    @include viewport.until(sm) {
-      padding: 9px;
+    &[aria-expanded="true"] {
+      background: var(--primary-low);
+      color: var(--primary-high);
+      z-index: 1;
 
-      &[aria-expanded="true"] {
-        background: var(--primary-low);
+      .d-icon {
         color: var(--primary-high);
-        box-shadow: 0 0 0 1px var(--primary-300);
-        z-index: 1;
-        margin-left: 1px;
+      }
+    }
+
+    .discourse-no-touch & {
+      &:hover {
+        color: var(--primary);
 
         .d-icon {
           color: var(--primary-high);
@@ -638,37 +622,10 @@ nav.post-controls {
     }
 
     @include viewport.from(sm) {
-      margin-left: 0;
       white-space: nowrap;
 
       .topic-post & {
         margin-right: var(--space-2);
-      }
-
-      &[aria-expanded="true"] {
-        background: var(--primary-low);
-        color: var(--primary-high);
-        box-shadow: 0 0 0 1px var(--primary-300);
-        z-index: 1;
-
-        .d-icon {
-          color: var(--primary-high);
-        }
-
-        &:hover,
-        &:focus {
-          background: var(--primary-300);
-          color: var(--primary);
-        }
-      }
-    }
-
-    .discourse-no-touch & {
-      &:hover,
-      &:focus-visible {
-        outline: none;
-        color: var(--d-post-control-text-color--hover);
-        background: var(--d-post-control-background--hover);
       }
     }
 
@@ -712,6 +669,17 @@ nav.post-controls {
         flex-grow: 2;
       }
     }
+  }
+}
+
+.expand-post {
+  @include viewport.until(sm) {
+    margin: var(--space-3) 0;
+  }
+
+  @include viewport.from(sm) {
+    margin-top: var(--space-3);
+    margin-left: var(--topic-body-width-padding);
   }
 }
 
@@ -822,8 +790,9 @@ aside.quote {
     gap: var(--space-2);
     color: var(--primary-high-or-secondary-low);
     padding: 0.8em 0.8em 0 0.8em;
+    background: var(--d-post-aside-background);
+    border-left: var(--d-post-aside-border-left);
 
-    @include post-aside;
     @include unselectable;
 
     &[data-can-toggle-quote] {
@@ -1028,6 +997,11 @@ aside.quote {
   .buttons {
     display: flex;
     flex-wrap: wrap;
+
+    .btn,
+    .ai-post-helper {
+      border-radius: 0;
+    }
 
     @media screen and (width <= 420px) {
       flex-direction: column;
@@ -1263,6 +1237,7 @@ aside.quote {
 }
 
 pre {
+  // safety cap; also covers a `pre` with no `code` child
   max-height: 2000px;
 
   .bidi-warning,
@@ -1308,7 +1283,7 @@ pre {
   }
 
   @include viewport.until(sm) {
-    code {
+    > code {
       padding-right: 2.75em;
     }
   }
@@ -1436,10 +1411,6 @@ blockquote .post__contents-cooked-quote {
   display: flex;
   align-items: center;
 
-  &:focus-visible {
-    outline: none;
-  }
-
   &.deleted {
     .topic-avatar,
     .small-action-desc {
@@ -1457,77 +1428,64 @@ blockquote .post__contents-cooked-quote {
     align-self: stretch;
     flex: 0 0 auto;
     margin: 0;
-    padding-top: 1em;
+    padding-top: var(--space-4);
     width: var(--topic-avatar-width);
     justify-content: center;
     height: auto;
 
     .d-icon {
       font-size: var(--font-up-3);
-      width: var(--topic-avatar-width);
       color: var(--primary-low-mid);
     }
   }
 
   .small-action-desc {
     box-sizing: border-box;
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0 var(--space-2);
     color: var(--primary-700);
-    padding: 1em 0 1em var(--topic-body-width-padding);
+    padding: 0 0 var(--space-3) var(--topic-body-width-padding);
     width: calc(
       var(--topic-body-width) + (var(--topic-body-width-padding) * 2)
     );
-    min-width: 0; // Allows flex container to shrink
+    min-width: 0; // Allows container to shrink
+  }
 
-    .avatar {
-      margin-right: 0.5em;
-      float: left;
+  .small-action-contents {
+    display: flex;
+    gap: var(--space-1);
+    align-items: start;
+    padding-top: 1.15em;
+
+    [data-user-card] {
+      margin-top: calc(var(--space-half) * -1);
     }
 
     p {
       margin: 0;
-      padding: 0.15em 0.5em 0 0;
     }
   }
 
-  .small-action-contents {
-    flex: 1 1 auto;
-  }
-
   .small-action-buttons {
-    margin-left: auto;
+    display: flex;
+    padding-top: var(--space-3);
   }
 
   .small-action-custom-message {
+    grid-column: 1 / -1;
     flex: 1 1 100%;
     font-weight: normal;
-    margin-top: 0.5em;
+    margin-top: var(--space-2);
     word-break: break-word;
     min-width: 0; // Allows content like oneboxes to shrink
     color: var(--primary);
 
     p {
       margin-bottom: 0;
-    }
-  }
 
-  button {
-    background: transparent;
-    font-size: var(--font-down-1);
-
-    .d-icon {
-      color: var(--primary-500);
-    }
-
-    .discourse-no-touch & {
-      &:hover,
-      &:focus {
-        background: var(--primary-200);
-
-        .d-icon {
-          color: var(--primary);
-        }
+      + *:not(.cooked-selection-barrier) {
+        margin-top: var(--space-4);
       }
     }
   }
@@ -1551,6 +1509,33 @@ blockquote .post__contents-cooked-quote {
         background-color: var(--secondary);
         padding: 0 0.5em;
       }
+    }
+  }
+}
+
+.time-gap {
+  .small-action-desc {
+    padding-top: var(--space-3);
+  }
+
+  + .topic-post {
+    .topic-body,
+    .topic-avatar {
+      border-top: none;
+    }
+
+    .embedded-posts.top {
+      border-bottom: none;
+    }
+  }
+
+  @include viewport.until(sm) {
+    + .topic-post article {
+      border-top: none;
+    }
+
+    .topic-avatar {
+      display: none;
     }
   }
 }
@@ -1672,10 +1657,6 @@ a.reply-to-tab {
 
   .d-icon {
     color: var(--primary-medium);
-  }
-
-  .avarar {
-    margin-left: var(--space-1);
   }
 }
 
@@ -1880,6 +1861,17 @@ a.reply-to-tab {
     width: 1.25em;
     height: 1.25em;
     color: var(--primary-high);
+  }
+
+  .post-notice-message {
+    flex: 1;
+    min-width: 0;
+
+    img:not(.emoji) {
+      max-width: 100%;
+      height: auto;
+      display: inline-block;
+    }
   }
 
   p {
@@ -2093,12 +2085,6 @@ span.highlighted {
   }
 }
 
-.fullscreen-code-modal {
-  pre code {
-    max-width: none;
-  }
-}
-
 .fullscreen-table-modal {
   .d-modal__container {
     width: auto;
@@ -2164,71 +2150,6 @@ html.discourse-no-touch .fullscreen-table-wrapper:hover {
   }
 }
 
-.liked-users-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-
-  &__list {
-    margin: 0;
-    list-style: none;
-    display: flex;
-    justify-content: end;
-    gap: var(--space-1);
-
-    // avatar width + gap * (max amount of users per row + 1)
-    max-width: calc((var(--liked-users-list-avatar-size) + var(--space-1)) * 9);
-    flex-wrap: wrap;
-  }
-
-  &__item,
-  &__item .avatar {
-    width: var(--liked-users-list-avatar-size);
-    height: var(--liked-users-list-avatar-size);
-  }
-
-  &__container {
-    --liked-users-list-avatar-size: 22px;
-    padding: var(--space-2);
-    display: flex;
-    align-items: flex-start;
-    gap: var(--space-2);
-  }
-
-  &__count {
-    display: flex;
-    gap: var(--space-2);
-    color: var(--primary-medium);
-    font-weight: 300;
-    align-items: center;
-  }
-
-  &__count-icon {
-    color: var(--love);
-  }
-
-  &__more {
-    font-size: var(--font-down-1);
-    color: var(--primary-medium);
-  }
-
-  &__more-button.btn-flat.btn {
-    padding: 0;
-    width: var(--liked-users-list-avatar-size);
-    border-radius: var(--d-button-border-radius);
-    height: var(--liked-users-list-avatar-size);
-  }
-}
-
-.time-gap + .topic-post .topic-body,
-.time-gap + .topic-post .topic-avatar {
-  border-top: none;
-}
-
-.time-gap + .topic-post .embedded-posts.top {
-  border-bottom: none;
-}
-
 span.post-count {
   background: var(--primary);
   color: var(--secondary);
@@ -2262,16 +2183,6 @@ span.post-count {
 
   .topic-post .boxed .contents {
     clear: both;
-  }
-
-  .time-gap {
-    + .topic-post article {
-      border-top: none;
-    }
-
-    .topic-avatar {
-      display: none;
-    }
   }
 
   // hide the full set of selection buttons on mobile

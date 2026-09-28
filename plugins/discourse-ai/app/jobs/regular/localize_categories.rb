@@ -20,9 +20,9 @@ module Jobs
       return if limit <= 0
 
       short_text_llm_model =
-        find_llm_model_for_persona(SiteSetting.ai_translation_short_text_translator_persona)
+        find_llm_model_for_agent(SiteSetting.ai_translation_short_text_translator_agent)
       post_raw_llm_model =
-        find_llm_model_for_persona(SiteSetting.ai_translation_post_raw_translator_persona)
+        find_llm_model_for_agent(SiteSetting.ai_translation_post_raw_translator_agent)
       return if short_text_llm_model.blank? && post_raw_llm_model.blank?
 
       categories =
@@ -31,17 +31,15 @@ module Jobs
           .where.not(locale: nil)
           .order(:id)
           .limit(limit)
+      categories = categories.where(id: args[:category_id]) if args[:category_id].present?
       return if categories.empty?
 
-      remaining_limit = limit
       locales = DiscourseAi::Translation.locales
+      force = args[:force] || false
       categories.each do |category|
-        break if remaining_limit <= 0
-
         existing_locales = CategoryLocalization.where(category_id: category.id).pluck(:locale)
-        missing_locales = locales - existing_locales - [category.locale]
-        missing_locales.each do |locale|
-          break if remaining_limit <= 0
+        target_locales = force ? locales : locales - existing_locales
+        target_locales.each do |locale|
           next if LocaleNormalizer.is_same?(locale, category.locale)
 
           begin
@@ -50,6 +48,7 @@ module Jobs
               locale,
               short_text_llm_model:,
               post_raw_llm_model:,
+              fields: args[:fields],
             )
           rescue FinalDestination::SSRFDetector::LookupFailedError
             # do nothing, there are too many sporadic lookup failures
@@ -57,8 +56,6 @@ module Jobs
             DiscourseAi::Translation::VerboseLogger.log(
               "Failed to translate category #{category.id} to #{locale}: #{e.message}\n\n#{e.backtrace[0..3].join("\n")}",
             )
-          ensure
-            remaining_limit -= 1
           end
         end
 
@@ -70,13 +67,13 @@ module Jobs
 
     private
 
-    def find_llm_model_for_persona(persona_id)
-      return nil if persona_id.blank?
+    def find_llm_model_for_agent(agent_id)
+      return nil if agent_id.blank?
 
-      persona_klass = AiPersona.find_by_id_from_cache(persona_id)
-      return nil if persona_klass.blank?
+      agent_klass = AiAgent.find_by_id_from_cache(agent_id)
+      return nil if agent_klass.blank?
 
-      DiscourseAi::Translation::BaseTranslator.preferred_llm_model(persona_klass)
+      DiscourseAi::Translation::BaseTranslator.preferred_llm_model(agent_klass)
     end
   end
 end

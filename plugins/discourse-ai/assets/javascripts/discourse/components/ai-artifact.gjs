@@ -3,10 +3,10 @@ import { tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";
 import didInsert from "@ember/render-modifiers/modifiers/did-insert";
 import { service } from "@ember/service";
-import { htmlSafe } from "@ember/template";
-import DButton from "discourse/components/d-button";
+import { trustHTML } from "@ember/template";
 import htmlClass from "discourse/helpers/html-class";
 import getURL from "discourse/lib/get-url";
+import DButton from "discourse/ui-kit/d-button";
 
 export default class AiArtifactComponent extends Component {
   @service siteSettings;
@@ -25,22 +25,6 @@ export default class AiArtifactComponent extends Component {
     super.willDestroy(...arguments);
     window.removeEventListener("keydown", this.keydownHandler);
     window.removeEventListener("popstate", this.popStateHandler);
-  }
-
-  @action
-  handleKeydown(event) {
-    if (event.key === "Escape" || event.key === "Esc") {
-      history.back();
-    }
-  }
-
-  @action
-  handlePopState(event) {
-    const state = event.state;
-    this.expanded = state?.artifactId === this.args.artifactId;
-    if (!this.expanded) {
-      window.removeEventListener("keydown", this.keydownHandler);
-    }
   }
 
   get requireClickToRun() {
@@ -73,6 +57,55 @@ export default class AiArtifactComponent extends Component {
     return url;
   }
 
+  get wrapperClasses() {
+    return `ai-artifact__wrapper ${
+      this.expanded ? "ai-artifact__expanded" : ""
+    } ${this.seamless ? "ai-artifact__seamless" : ""}`;
+  }
+
+  get heightStyle() {
+    if (this.args.artifactHeight) {
+      let height = parseInt(this.args.artifactHeight, 10);
+      if (isNaN(height) || height <= 0) {
+        height = 500; // default height if the provided value is invalid
+      }
+
+      if (height > 2000) {
+        height = 2000; // cap the height to a maximum of 2000px
+      }
+
+      return trustHTML(`height: ${height}px;`);
+    }
+  }
+
+  get seamless() {
+    return (
+      this.args.seamless === "true" ||
+      this.args.seamless === true ||
+      this.args.seamless === "1"
+    );
+  }
+
+  get showFooter() {
+    return !this.seamless && !this.requireClickToRun;
+  }
+
+  @action
+  handleKeydown(event) {
+    if (event.key === "Escape" || event.key === "Esc") {
+      history.back();
+    }
+  }
+
+  @action
+  handlePopState(event) {
+    const state = event.state;
+    this.expanded = state?.artifactId === this.args.artifactId;
+    if (!this.expanded) {
+      window.removeEventListener("keydown", this.keydownHandler);
+    }
+  }
+
   @action
   showArtifact() {
     this.showingArtifact = true;
@@ -93,12 +126,6 @@ export default class AiArtifactComponent extends Component {
     this.expanded = !this.expanded;
   }
 
-  get wrapperClasses() {
-    return `ai-artifact__wrapper ${
-      this.expanded ? "ai-artifact__expanded" : ""
-    } ${this.seamless ? "ai-artifact__seamless" : ""}`;
-  }
-
   @action
   setDataAttributes(element) {
     if (this.args.dataAttributes) {
@@ -106,33 +133,6 @@ export default class AiArtifactComponent extends Component {
         element.setAttribute(key, value);
       });
     }
-  }
-
-  get heightStyle() {
-    if (this.args.artifactHeight) {
-      let height = parseInt(this.args.artifactHeight, 10);
-      if (isNaN(height) || height <= 0) {
-        height = 500; // default height if the provided value is invalid
-      }
-
-      if (height > 2000) {
-        height = 2000; // cap the height to a maximum of 2000px
-      }
-
-      return htmlSafe(`height: ${height}px;`);
-    }
-  }
-
-  get seamless() {
-    return (
-      this.args.seamless === "true" ||
-      this.args.seamless === true ||
-      this.args.seamless === "1"
-    );
-  }
-
-  get showFooter() {
-    return !this.seamless && !this.requireClickToRun;
   }
 
   <template>
@@ -144,9 +144,9 @@ export default class AiArtifactComponent extends Component {
         <div class="ai-artifact__panel">
           <DButton
             class="btn-flat btn-icon-text"
+            @action={{this.toggleView}}
             @icon="discourse-compress"
             @label="discourse_ai.ai_artifact.collapse_view_label"
-            @action={{this.toggleView}}
           />
         </div>
       </div>
@@ -154,17 +154,17 @@ export default class AiArtifactComponent extends Component {
         <div class="ai-artifact__click-to-run">
           <DButton
             class="btn btn-primary"
+            @action={{this.showArtifact}}
             @icon="play"
             @label="discourse_ai.ai_artifact.click_to_run_label"
-            @action={{this.showArtifact}}
           />
         </div>
       {{else}}
         <iframe
-          title="AI Artifact"
-          src={{this.artifactUrl}}
-          width="100%"
           frameborder="0"
+          src={{this.artifactUrl}}
+          title="AI Artifact"
+          width="100%"
           {{didInsert this.setDataAttributes}}
         ></iframe>
       {{/if}}
@@ -172,9 +172,9 @@ export default class AiArtifactComponent extends Component {
         <div class="ai-artifact__footer">
           <DButton
             class="btn-transparent btn-icon-text ai-artifact__expand-button"
+            @action={{this.toggleView}}
             @icon="discourse-expand"
             @label="discourse_ai.ai_artifact.expand_view_label"
-            @action={{this.toggleView}}
           />
         </div>
       {{/if}}

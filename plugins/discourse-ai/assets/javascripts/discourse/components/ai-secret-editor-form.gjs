@@ -92,33 +92,35 @@ export default class AiSecretEditorForm extends Component {
 
   <template>
     <BackButton
-      @route="adminPlugins.show.discourse-ai-secrets"
       @label="discourse_ai.secrets.back"
+      @route="adminPlugins.show.discourse-ai-secrets"
     />
     <Form
-      @onSubmit={{this.save}}
-      @data={{this.formData}}
       class="ai-secret-editor"
+      @data={{this.formData}}
+      @onSubmit={{this.save}}
       as |form|
     >
       <form.Field
+        @format="large"
         @name="name"
         @title={{i18n "discourse_ai.secrets.name"}}
+        @type="input"
         @validation="required|length:1,100"
-        @format="large"
         as |field|
       >
-        <field.Input />
+        <field.Control />
       </form.Field>
 
       <form.Field
+        @format="large"
         @name="secret"
         @title={{i18n "discourse_ai.secrets.secret"}}
+        @type="password"
         @validation="required"
-        @format="large"
         as |field|
       >
-        <field.Password autocomplete="off" />
+        <field.Control autocomplete="off" />
       </form.Field>
 
       <form.Actions>
@@ -131,13 +133,23 @@ export default class AiSecretEditorForm extends Component {
               {{#each @model.used_by as |usage index|}}
                 {{~#if (eq usage.type "embedding")~}}
                   <LinkTo
-                    @route="adminPlugins.show.discourse-ai-embeddings.edit"
                     @model={{usage.id}}
+                    @route="adminPlugins.show.discourse-ai-embeddings.edit"
+                  >{{usage.name}}</LinkTo>
+                {{~else if (eq usage.type "tool")~}}
+                  <LinkTo
+                    @model={{usage.id}}
+                    @route="adminPlugins.show.discourse-ai-tools.edit"
+                  >{{usage.name}}</LinkTo>
+                {{~else if (eq usage.type "mcp_server")~}}
+                  <LinkTo
+                    @model={{usage.id}}
+                    @route="adminPlugins.show.discourse-ai-tools.mcp-server-edit"
                   >{{usage.name}}</LinkTo>
                 {{~else~}}
                   <LinkTo
-                    @route="adminPlugins.show.discourse-ai-llms.edit"
                     @model={{usage.id}}
+                    @route="adminPlugins.show.discourse-ai-llms.edit"
                   >{{usage.name}}</LinkTo>
                 {{~/if~}}
                 {{~#unless (eq index this.usedByLastIndex)~}}{{i18n
@@ -147,9 +159,9 @@ export default class AiSecretEditorForm extends Component {
             </div>
           {{else}}
             <form.Button
+              class="btn-danger"
               @action={{this.delete}}
               @label="discourse_ai.secrets.delete"
-              class="btn-danger"
             />
           {{/if}}
         {{/unless}}

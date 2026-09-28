@@ -28,6 +28,7 @@ RSpec.describe User::Action::TriggerPostAction do
 
     context "when post_action is 'none'" do
       let(:post_action) { "none" }
+
       it "does nothing" do
         expect { action }.not_to change { Post.count }
       end
@@ -84,8 +85,19 @@ RSpec.describe User::Action::TriggerPostAction do
         let(:post_action) { "edit" }
         let(:post_edit) { "blabla" }
 
-        it "edits the post with what the moderator wrote" do
-          expect { action }.to change { post.reload.raw }.to eq("blabla")
+        context "when user cannot edit a post" do
+          fab!(:regular_user, :user)
+          let(:guardian) { regular_user.guardian }
+
+          it "does nothing" do
+            expect { action }.not_to change { post.reload.raw }
+          end
+        end
+
+        context "when user can edit a post" do
+          it "edits the post with what the moderator wrote" do
+            expect { action }.to change { post.reload.raw }.to eq("blabla")
+          end
         end
       end
     end

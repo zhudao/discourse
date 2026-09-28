@@ -111,6 +111,77 @@ RSpec.describe DiscourseAi::AiBot::ArtifactsController do
         expect(response.status).to eq(200)
         expect(parse_srcdoc(response.body)).to include(artifact.html)
       end
+
+      it "returns 404 when the source topic has been trashed" do
+        topic.trash!
+
+        get "/discourse-ai/ai-bot/artifacts/#{artifact.id}"
+        expect(response.status).to eq(404)
+      end
+    end
+
+    it "hides artifacts and future versions when their conversation share is invalidated" do
+      llm_model = Fabricate(:llm_model, name: "artifact-sharing-model")
+      toggle_enabled_bots(bots: [llm_model])
+      SiteSetting.ai_bot_enabled = true
+      SiteSetting.ai_bot_public_sharing_allowed_groups = "10"
+      Group.user_trust_level_change!(user.id, user.trust_level)
+
+      bot_user = llm_model.reload.user
+      topic.topic_allowed_users.where.not(user_id: user.id).delete_all
+      topic.topic_allowed_users.create!(user: bot_user)
+      post.update_columns(
+        cooked: "<div class='ai-artifact' data-ai-artifact-id='#{artifact.id}'></div>",
+      )
+
+      public_key_value =
+        Fabricate(
+          :ai_artifact_key_value,
+          ai_artifact: artifact,
+          user: user,
+          key: "shared_public_key",
+          value: "shared_public_value",
+          public: true,
+        )
+
+      shared_conversation = SharedAiConversation.share_conversation(user, topic)
+      expect(shared_conversation.publicly_visible?).to eq(true)
+      expect(artifact.reload.public?).to eq(true)
+
+      topic.topic_allowed_users.create!(user: Fabricate(:user))
+      artifact_version =
+        artifact.create_new_version(html: "<div>Future private artifact version</div>")
+
+      get "/discourse-ai/ai-bot/shared-ai-conversations/#{shared_conversation.share_key}.json"
+      shared_conversation_status = response.status
+
+      get artifact.url
+      artifact_response = {
+        status: response.status,
+        body: response.status == 200 ? parse_srcdoc(response.body) : response.body,
+      }
+
+      get AiArtifact.url(artifact.id, artifact_version.version_number)
+      artifact_version_response = {
+        status: response.status,
+        body: response.status == 200 ? parse_srcdoc(response.body) : response.body,
+      }
+
+      get "/discourse-ai/ai-bot/artifact-key-values/#{artifact.id}.json",
+          params: {
+            all_users: true,
+          }
+      key_values_response = { status: response.status, body: response.body }
+
+      aggregate_failures do
+        expect(shared_conversation_status).to eq(404)
+        expect(artifact_response[:status]).to eq(404)
+        expect(artifact_response[:body]).not_to include(artifact.html)
+        expect(artifact_version_response[:status]).to eq(404)
+        expect(artifact_version_response[:body]).not_to include(artifact_version.html)
+        expect(key_values_response[:status]).to eq(404)
+        expect(key_values_response[:body]).not_to include(public_key_value.value)
+      end
     end
 
     it "sanitizes CSS to prevent style tag breakout" do
@@ -136,6 +207,29 @@ RSpec.describe DiscourseAi::AiBot::ArtifactsController do
       expect(response.headers["X-Frame-Options"]).to eq(nil)
       expect(response.headers["Content-Security-Policy"]).to include("unsafe-inline")
       expect(response.headers["X-Robots-Tag"]).to eq("noindex")
+    end
+
+    it "forces a same-origin opener policy for artifact pages" do
+      SiteSetting.cross_origin_opener_policy_header = "unsafe-none"
+
+      sign_in(user)
+      get "/discourse-ai/ai-bot/artifacts/#{artifact.id}"
+
+      expect(response.status).to eq(200)
+      expect(response.headers["Cross-Origin-Opener-Policy"]).to eq("same-origin")
+    end
+
+    it "validates event.source against the child iframe in the KV postMessage handler" do
+      sign_in(user)
+      get "/discourse-ai/ai-bot/artifacts/#{artifact.id}"
+      expect(response.status).to eq(200)
+
+      doc = Nokogiri.HTML5(response.body)
+      parent_scripts = doc.css("body > script").map(&:text)
+      kv_handler_script = parent_scripts.find { |s| s.include?("discourse-artifact-kv") }
+
+      expect(kv_handler_script).to be_present
+      expect(kv_handler_script).to match(/event\.source\s*!==?\s*\w+\.contentWindow/)
     end
   end
 end

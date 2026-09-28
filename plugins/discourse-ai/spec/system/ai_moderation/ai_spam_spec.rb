@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-RSpec.describe "AI Spam Configuration", type: :system do
+RSpec.describe "AI Spam Configuration" do
   fab!(:admin)
 
   before do
@@ -24,6 +24,7 @@ RSpec.describe "AI Spam Configuration", type: :system do
       expect(toggle.unchecked?).to eq(true)
     end
   end
+
   context "when LLMs are configured" do
     fab!(:llm_model)
     it "can properly configure spam settings" do

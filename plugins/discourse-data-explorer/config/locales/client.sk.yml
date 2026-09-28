@@ -6,12 +6,18 @@
 
 sk:
   js:
+    discourse_ai:
+      features:
+        data_explorer:
+          name: "Prieskumník údajov"
     errors:
       explorer:
         no_semicolons: "Odstráňte z dotazu bodkočiarky."
         dirty: "Pred spustením musíte dotaz uložiť."
+    data_explorer:
+      admin_dashboard_card:
+        no_results: "Žiadne výsledky"
     explorer:
-      default_query: "Predvolené"
       or: "alebo"
       admins_only: "Prieskumník údajov je dostupný iba administrátorom."
       allow_groups: "Povolenie prístupu skupín k tomuto dotazu"
@@ -19,6 +25,9 @@ sk:
       create: "Vytvoriť"
       create_placeholder: "Názov dotazu..."
       description_placeholder: "Sem zadajte popis"
+      ai:
+        generate: "Generovať"
+        optional: "voliteľné"
       import:
         label: "Import"
         unparseable_json: "Súbor JSON, ktorý sa nedá rozdeliť."
@@ -35,17 +44,14 @@ sk:
           yes: "Áno"
           no: "Nie"
           null_: "Null"
-      export: "Exportovať"
       view_json: "Zobraziť JSON"
       save: "Uloženie zmien"
       run: "Spustiť"
       undo: "Zahodenie zmien"
-      edit: "Upraviť"
       delete: "Odstrániť"
-      download_json: "JSON"
-      download_csv: "CSV"
-      show_table: "Tabuľka"
-      show_graph: "Graf"
+      chart:
+        form:
+          bar: "Lišta"
       others_dirty: "Dotaz obsahuje neuložené zmeny, ktoré sa stratia, ak prejdete preč."
       run_time: "Dotaz bol dokončený za %{value} ms."
       result_count:
@@ -60,13 +66,13 @@ sk:
         other: "Zobrazujú sa prvé %{count} výsledky."
       query_name: "Dopyt"
       query_groups: "Skupiny"
+      query_tags: "Značky"
       link: "Odkaz na"
       report_name: "Hlásenie"
       query_description: "Popis"
       query_time: "Posledný beh"
       query_user: "Vytvoril"
       column: "Stĺpec %{number}"
-      explain_label: "Zahrnúť plán dotazov?"
       reset_params: "Resetovať"
       search_placeholder: "Hľadať"
       no_search_results: "Prepáčte, nenašli sme žiadne výsledky zodpovedajúce vášmu textu."
@@ -81,8 +87,18 @@ sk:
       api:
         scopes:
           descriptions:
-            discourse_data_explorer:
+            data_explorer:
               run_queries: "Spustite dotazy Data Explorer. Obmedzte kľúč API na súbor dotazov zadaním ID dotazov."
+    discourse_workflows:
+      nodes:
+        "action:sql": "Prieskumník údajov"
+      sql:
+        query_id: "Dopyt"
+        add_param: "Pridať parameter"
+        param_value: "Hodnota"
+        output:
+          results: "Výsledky"
+          no_results: "Žiadne výsledky"
     discourse_automation:
       scriptables:
         recurring_data_explorer_result_pm:

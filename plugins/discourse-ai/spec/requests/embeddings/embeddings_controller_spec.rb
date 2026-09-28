@@ -44,7 +44,7 @@ describe DiscourseAi::Embeddings::EmbeddingsController do
 
     def create_api_key(user)
       key = ApiKey.create!(user: user)
-      ApiKeyScope.create!(resource: "discourse_ai", action: "search", api_key_id: key.id)
+      ApiKeyScope.create!(resource: "ai", action: "search", api_key_id: key.id)
       key
     end
 
@@ -69,7 +69,7 @@ describe DiscourseAi::Embeddings::EmbeddingsController do
     context "when rate limiting is enabled" do
       before { RateLimiter.enable }
 
-      it "will rate limit correctly" do
+      it "rate limits repeated requests" do
         stub_const(described_class, :MAX_HYDE_SEARCHES_PER_MINUTE, 1) do
           stub_const(described_class, :MAX_SEARCHES_PER_MINUTE, 2) do
             query = "test #{SecureRandom.hex}"

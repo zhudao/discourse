@@ -13,7 +13,9 @@ tr_TR:
   js:
     styleguide:
       title: "Stil rehberi"
-      welcome: "Başlamak için soldaki menüden bir bölüm seçin."
+      example:
+        kind:
+          component: "Bileşen"
       categories:
         syntax: Sözdizimi
         atoms: Atomlar
@@ -30,6 +32,10 @@ tr_TR:
           title: "Tarih/Saat girdileri"
         menus:
           title: "Menüler"
+        context_menu:
+          actions:
+            duplicate: "Eş Kopya"
+            delete: "Sil"
         multi_select:
           title: "Çoklu seçim"
         toasts:
@@ -38,6 +44,10 @@ tr_TR:
           title: "Yazı Tipi Sistemi"
         colors:
           title: "Renkler"
+        dialog:
+          title: "Diyalog"
+        drag_and_drop:
+          locked: "Kilitli"
         icons:
           title: "Simgeler"
           full_list: "Font Awesome Simgelerinin tam listesine bakın"
@@ -59,6 +69,8 @@ tr_TR:
           title: "Gezinti Yığılı"
         categories_list:
           title: "Kategori Listesi"
+        topic_link:
+          title: "Konu Bağlantısı ve Durumu"
         topic_list_item:
           title: "Konu Listesi Ögesi"
         topic_statuses:
@@ -81,6 +93,8 @@ tr_TR:
           title: "Gönderi Listesi"
           empty_example: "<PostList /> boş durum"
           populated_example: "<PostList /> doldurulmuş durum"
+        post_oneboxes:
+          title: "Onebox'ları Gönder"
         topic_map:
           title: "Konu Haritası"
         site_header:
@@ -89,6 +103,31 @@ tr_TR:
           title: "Daha Fazla Konu"
         post_menu:
           title: "Gönderi Menüsü"
+        roving_focus:
+          toolbar:
+            copy: "Kopyala"
+          tags:
+            remove: "%{tag} öğesini kaldır"
+            design: "Tasarım"
+            support: "Destek"
+          adjacent:
+            label: "Filtreler"
+            field: "Ara"
+            placeholder: "Konuları ara"
+            open: "Aç"
+            recent: "Yakın zaman"
+          listbox:
+            apple: "Apple"
+          combobox:
+            daily: "Günlük"
+            weekly: "Haftalık"
+            monthly: "Aylık"
+            never: "Asla"
+          tree:
+            components: "Bileşenler"
+            select: "Seç"
+        docked_composer:
+          title: "Docked Composer"
         modal:
           title: "Kalıcı"
           header: "Kalıcı Başlık"
@@ -99,6 +138,8 @@ tr_TR:
           title: "Başlık Simgeleri"
         spinners:
           title: "Değer Değiştiriciler"
+        otp:
+          title: "OTP"
         empty_state:
           title: "Boş Durum"
         tooltips:
@@ -109,3 +150,5 @@ tr_TR:
         char_counter:
           title: "Karakter Sayacı"
           placeholder: "Metninizi buraya girin..."
+        segmented_control:
+          title: "Bölümlü Kontrol (Düğme geçiş grubu)"

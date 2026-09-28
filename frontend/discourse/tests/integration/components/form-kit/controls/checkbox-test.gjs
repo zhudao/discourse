@@ -15,9 +15,9 @@ module(
 
       await render(
         <template>
-          <Form @onSubmit={{mutateData}} @data={{data}} as |form|>
-            <form.Field @name="foo" @title="Foo" as |field|>
-              <field.Checkbox />
+          <Form @data={{data}} @onSubmit={{mutateData}} as |form|>
+            <form.Field @name="foo" @title="Foo" @type="checkbox" as |field|>
+              <field.Control />
             </form.Field>
           </Form>
         </template>
@@ -35,12 +35,43 @@ module(
       assert.deepEqual(data, { foo: true });
     });
 
+    test("when value is string 'false'", async function (assert) {
+      let data = { foo: "false" };
+      const mutateData = (x) => (data = x);
+
+      await render(
+        <template>
+          <Form @data={{data}} @onSubmit={{mutateData}} as |form|>
+            <form.Field @name="foo" @title="Foo" @type="checkbox" as |field|>
+              <field.Control />
+            </form.Field>
+          </Form>
+        </template>
+      );
+
+      assert.form().field("foo").hasValue(false);
+
+      await formKit().field("foo").toggle();
+
+      assert.form().field("foo").hasValue(true);
+
+      await formKit().submit();
+
+      assert.deepEqual(data, { foo: true });
+    });
+
     test("when disabled", async function (assert) {
       await render(
         <template>
           <Form as |form|>
-            <form.Field @name="foo" @title="Foo" @disabled={{true}} as |field|>
-              <field.Checkbox />
+            <form.Field
+              @disabled={{true}}
+              @name="foo"
+              @title="Foo"
+              @type="checkbox"
+              as |field|
+            >
+              <field.Control />
             </form.Field>
           </Form>
         </template>
@@ -53,8 +84,14 @@ module(
       await render(
         <template>
           <Form as |form|>
-            <form.Field @tooltip="test" @name="foo" @title="Foo" as |field|>
-              <field.Checkbox />
+            <form.Field
+              @name="foo"
+              @title="Foo"
+              @tooltip="test"
+              @type="checkbox"
+              as |field|
+            >
+              <field.Control />
             </form.Field>
           </Form>
         </template>
@@ -69,14 +106,53 @@ module(
       await render(
         <template>
           <Form as |form|>
-            <form.Field @name="foo" @title="Foo" as |field|>
-              <field.Checkbox />
+            <form.Field @name="foo" @title="Foo" @type="checkbox" as |field|>
+              <field.Control />
             </form.Field>
           </Form>
         </template>
       );
 
-      assert.form().field("foo").hasTitle("Foo (optional)");
+      assert.form().field("foo").hasTitle("Foo");
+    });
+
+    test("@title", async function (assert) {
+      await render(
+        <template>
+          <Form as |form|>
+            <form.Field @name="foo" @title="Foo" @type="checkbox" as |field|>
+              <field.Control @title="Bar" />
+            </form.Field>
+          </Form>
+        </template>
+      );
+
+      assert.form().field("foo").hasTitle("Bar");
+    });
+
+    test("when value is string 'true'", async function (assert) {
+      let data = { foo: "true" };
+      const mutateData = (x) => (data = x);
+
+      await render(
+        <template>
+          <Form @data={{data}} @onSubmit={{mutateData}} as |form|>
+            <form.Field @name="foo" @title="Foo" @type="checkbox" as |field|>
+              <field.Control />
+            </form.Field>
+          </Form>
+        </template>
+      );
+
+      assert.form().field("foo").hasValue(true);
+
+      await formKit().field("foo").toggle();
+
+      assert.form().field("foo").hasValue(false);
+
+      await formKit().submit();
+
+      assert.deepEqual(data, { foo: false });
     });
 
     test("required", async function (assert) {
@@ -86,16 +162,17 @@ module(
             <form.Field
               @name="foo"
               @title="Foo"
+              @type="checkbox"
               @validation="required"
               as |field|
             >
-              <field.Checkbox />
+              <field.Control />
             </form.Field>
           </Form>
         </template>
       );
 
-      assert.form().field("foo").hasTitle("Foo");
+      assert.form().field("foo").hasTitle("Foo (required)");
       await formKit().submit();
       assert.form().field("foo").hasError("Required");
 

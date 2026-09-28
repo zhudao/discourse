@@ -30,11 +30,20 @@ class UserNotifications < ActionMailer::Base
         locale: locale,
       )
 
+    login_url =
+      if !user.has_password? && Invite.email_code_enabled?(user)
+        "#{Discourse.base_url}/login?mode=code"
+      else
+        Discourse.base_url
+      end
+
     build_email(
       user.email,
       template: "user_notifications.signup_after_approval",
       locale: locale,
+      login_url:,
       new_user_tips: tips,
+      recipient_user: user,
     )
   end
 
@@ -50,6 +59,7 @@ class UserNotifications < ActionMailer::Base
       locale: locale,
       base_url: Discourse.base_url,
       post_url: post_url,
+      recipient_user: user,
     )
   end
 
@@ -60,6 +70,7 @@ class UserNotifications < ActionMailer::Base
       template: "user_notifications.signup_after_reject",
       locale: locale,
       reject_reason: opts[:reject_reason],
+      recipient_user: user,
     )
   end
 
@@ -75,10 +86,11 @@ class UserNotifications < ActionMailer::Base
       template: "user_notifications.suspicious_login",
       locale: user_locale(user),
       client_ip: opts[:client_ip],
-      location: (location.presence || I18n.t("staff_action_logs.unknown")),
-      browser: I18n.t("user_auth_tokens.browser.#{browser}"),
+      location: location.presence || I18n.t("staff_action_logs.unknown"),
+      browser: I18n.t("browsers.#{browser}"),
       device: I18n.t("user_auth_tokens.device.#{device}"),
       os: I18n.t("user_auth_tokens.os.#{os}"),
+      recipient_user: user,
     )
   end
 
@@ -88,6 +100,7 @@ class UserNotifications < ActionMailer::Base
       template: "user_notifications.notify_old_email",
       locale: user_locale(user),
       new_email: opts[:new_email],
+      recipient_user: user,
     )
   end
 
@@ -97,6 +110,7 @@ class UserNotifications < ActionMailer::Base
       template: "user_notifications.notify_old_email_add",
       locale: user_locale(user),
       new_email: opts[:new_email],
+      recipient_user: user,
     )
   end
 
@@ -165,6 +179,7 @@ class UserNotifications < ActionMailer::Base
         template: "user_notifications.account_silenced_forever",
         locale: user_locale(user),
         reason: user_history.details,
+        recipient_user: user,
       )
     else
       silenced_till = user.silenced_till.in_time_zone(user.user_option.timezone.presence || "UTC")
@@ -174,6 +189,7 @@ class UserNotifications < ActionMailer::Base
         locale: user_locale(user),
         reason: user_history.details,
         silenced_till: I18n.l(silenced_till, format: :long),
+        recipient_user: user,
       )
     end
   end
@@ -206,6 +222,7 @@ class UserNotifications < ActionMailer::Base
         template: "user_notifications.account_suspended_forever",
         locale: user_locale(user),
         reason: user_history.details,
+        recipient_user: user,
       )
     else
       suspended_till = user.suspended_till.in_time_zone(user.user_option.timezone.presence || "UTC")
@@ -215,6 +232,7 @@ class UserNotifications < ActionMailer::Base
         locale: user_locale(user),
         reason: user_history.details,
         suspended_till: I18n.l(suspended_till, format: :long),
+        recipient_user: user,
       )
     end
   end
@@ -225,6 +243,7 @@ class UserNotifications < ActionMailer::Base
       template: "user_notifications.account_exists",
       locale: user_locale(user),
       email: user.email,
+      recipient_user: user,
     )
   end
 
@@ -234,12 +253,15 @@ class UserNotifications < ActionMailer::Base
       template: "user_notifications.account_second_factor_disabled",
       locale: user_locale(user),
       email: user.email,
+      recipient_user: user,
     )
   end
 
   def digest(user, opts = {})
     build_summary_for(user)
-    @unsubscribe_key = UnsubscribeKey.create_key_for(@user, UnsubscribeKey::DIGEST_TYPE)
+    if !opts[:skip_unsubscribe_links]
+      @unsubscribe_key = UnsubscribeKey.create_key_for(@user, UnsubscribeKey::DIGEST_TYPE)
+    end
 
     @since = opts[:since].presence
     @since ||= [user.last_seen_at, user.user_stat&.digest_attempted_at, 1.month.ago].compact.max
@@ -351,20 +373,23 @@ class UserNotifications < ActionMailer::Base
 
       @preheader_text = I18n.t("user_notifications.digest.preheader", since: @since)
 
+      subject_key = "user_notifications.digest.subject_template"
+
+      if SiteSetting.simple_email_subject && I18n.exists?("#{subject_key}_improved")
+        subject_key += "_improved"
+      end
+
       opts = {
         from_alias: I18n.t("user_notifications.digest.from", site_name: Email.site_title),
-        subject:
-          I18n.t(
-            "user_notifications.digest.subject_template",
-            email_prefix: @email_prefix,
-            date: short_date(Time.now),
-          ),
-        add_unsubscribe_link: true,
+        subject: I18n.t(subject_key, email_prefix: @email_prefix, date: short_date(Time.now)),
+        add_unsubscribe_link: !opts[:skip_unsubscribe_links],
         unsubscribe_url: "#{Discourse.base_url}/email/unsubscribe/#{@unsubscribe_key}",
         topic_ids: topics_for_digest.pluck(:id),
         post_ids:
           topics_for_digest.joins(:posts).where(posts: { post_number: 1 }).pluck("posts.id"),
       }
+
+      opts[:recipient_user] = user
 
       build_email(user.email, opts)
     end
@@ -556,7 +581,7 @@ class UserNotifications < ActionMailer::Base
       title: topic_title,
       post: post,
       username: original_username,
-      from_alias: user_name,
+      from_alias: I18n.t("email_from", user_name: user_name, site_name: Email.site_title),
       allow_reply_by_email: allow_reply_by_email,
       use_site_subject: opts[:use_site_subject],
       add_re_to_subject: opts[:add_re_to_subject],
@@ -646,9 +671,9 @@ class UserNotifications < ActionMailer::Base
       subject_pm =
         if opts[:show_group_in_subject] && group.present?
           if group.full_name
-            "[#{group.full_name}] "
+            SiteSetting.simple_email_subject ? "#{group.full_name}: " : "[#{group.full_name}] "
           else
-            "[#{group.name}] "
+            SiteSetting.simple_email_subject ? "#{group.name}: " : "[#{group.name}] "
           end
         else
           I18n.t("subject_pm")
@@ -713,7 +738,7 @@ class UserNotifications < ActionMailer::Base
     else
       reached_limit = SiteSetting.max_emails_per_day_per_user > 0
       reached_limit &&=
-        (EmailLog.where(user_id: user.id).where("created_at > ?", 1.day.ago).count) >=
+        EmailLog.where(user_id: user.id).where("created_at > ?", 1.day.ago).count >=
           (SiteSetting.max_emails_per_day_per_user - 1)
 
       in_reply_to_post = post.reply_to_post if user.user_option.email_in_reply_to
@@ -733,9 +758,7 @@ class UserNotifications < ActionMailer::Base
       end
 
       first_footer_classes = "highlight"
-      if (allow_reply_by_email && user.staged) || (user.suspended? || user.staged?)
-        first_footer_classes = ""
-      end
+      first_footer_classes = "" if user.suspended? || (user.staged? && !SiteSetting.private_email?)
 
       unless translation_override_exists
         html =
@@ -769,15 +792,17 @@ class UserNotifications < ActionMailer::Base
       mailing_list_mode: user.user_option.mailing_list_mode,
       unsubscribe_url: post.unsubscribe_url(user),
       allow_reply_by_email: allow_reply_by_email,
-      only_reply_by_email: allow_reply_by_email && user.staged,
+      only_reply_by_email: allow_reply_by_email && user.staged? && !SiteSetting.private_email?,
       use_site_subject: use_site_subject,
       add_re_to_subject: add_re_to_subject,
       show_category_in_subject: show_category_in_subject,
       show_tags_in_subject: show_tags_in_subject,
+      tag_names: tags,
       private_reply: post.topic.private_message?,
       subject_pm: subject_pm,
       participants: participants,
-      include_respond_instructions: !(user.suspended? || user.staged?),
+      include_respond_instructions:
+        !(user.suspended? || (user.staged? && !SiteSetting.private_email?)),
       notification_type: notification_type,
       template: template,
       use_topic_title_subject: use_topic_title_subject,
@@ -787,6 +812,7 @@ class UserNotifications < ActionMailer::Base
       locale: locale,
     }
 
+    email_opts[:recipient_user] = user
     email_opts[:html_override] = html unless translation_override_exists
 
     # If we have a display name, change the from address
@@ -855,7 +881,13 @@ class UserNotifications < ActionMailer::Base
   private
 
   def build_user_email_token_by_template(template, user, email_token)
-    build_email(user.email, template: template, locale: user_locale(user), email_token: email_token)
+    build_email(
+      user.email,
+      template: template,
+      locale: user_locale(user),
+      email_token: email_token,
+      recipient_user: user,
+    )
   end
 
   def build_summary_for(user)

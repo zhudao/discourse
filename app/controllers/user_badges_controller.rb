@@ -23,8 +23,11 @@ class UserBadgesController < ApplicationController
     grant_count = nil
 
     if params[:username]
-      user_id = User.where(username_lower: params[:username].downcase).pick(:id)
-      user_badges = user_badges.where(user_id: user_id) if user_id
+      user = fetch_user_from_params(include_inactive: true)
+      raise Discourse::NotFound unless guardian.can_see_profile?(user)
+
+      user_id = user.id
+      user_badges = user_badges.where(user_id: user_id)
       grant_count = badge.user_badges.where(user_id: user_id).count
     end
 
@@ -87,7 +90,18 @@ class UserBadgesController < ApplicationController
     badge = fetch_badge_from_params
     post_id = nil
 
-    if params[:reason].present?
+    if params.key?(:post_id)
+      raise Discourse::InvalidParameters.new(:post_id) if params[:reason].present?
+
+      post_id = Integer(params[:post_id].to_s, 10, exception: false)
+      raise Discourse::InvalidParameters.new(:post_id) if post_id.nil? || post_id < 1
+
+      post = Post.find_by(id: post_id)
+      raise Discourse::NotFound if post.blank?
+
+      guardian.ensure_can_see!(post)
+      post_id = post.id
+    elsif params[:reason].present?
       unless is_badge_reason_valid? params[:reason]
         return(
           render json: failed_json.merge(message: I18n.t("invalid_grant_badge_reason_link")),
@@ -96,7 +110,8 @@ class UserBadgesController < ApplicationController
       end
 
       if route = Discourse.route_for(params[:reason])
-        if route[:controller] == "topics" && route[:action] == "show"
+        if (route[:controller] == "topics" && route[:action] == "show") ||
+             route[:controller] == "nested_topics"
           topic_id = (route[:id] || route[:topic_id]).to_i
           post_number = route[:post_number] || 1
           post_id = Post.find_by(topic_id: topic_id, post_number: post_number)&.id if topic_id > 0
@@ -107,7 +122,11 @@ class UserBadgesController < ApplicationController
     grant_opts_from_params =
       DiscoursePluginRegistry.apply_modifier(
         :user_badges_badge_grant_opts,
-        { granted_by: current_user, post_id: post_id },
+        {
+          granted_by: current_user,
+          post_id: post_id,
+          suppress_notification: params[:suppress_notification].to_s == "true",
+        },
         { param: params },
       )
 
@@ -183,6 +202,10 @@ class UserBadgesController < ApplicationController
 
   def is_badge_reason_valid?(reason)
     route = Discourse.route_for(reason)
-    route && (route[:controller] == "posts" || route[:controller] == "topics")
+    route &&
+      (
+        route[:controller] == "posts" || route[:controller] == "topics" ||
+          route[:controller] == "nested_topics"
+      )
   end
 end

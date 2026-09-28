@@ -131,14 +131,29 @@ export function sanitize(text, allowLister) {
             hrefAllowed(value, extraHrefMatchers)) ||
           (tag === "iframe" &&
             name === "src" &&
-            !value.match(/\/\.+\//) &&
-            allowedIframes.some((i) => {
-              const regex = i
-                // escape regex, keeping *
-                .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
-                .replace(/\*/g, "[^/]+");
-              return new RegExp(`^${regex}.*$`, "i").test(value);
-            }))
+            (() => {
+              let decoded;
+              try {
+                decoded = decodeURIComponent(value);
+              } catch {
+                return false;
+              }
+              const iframeUrls = [decoded];
+              iframeUrls.push(value);
+              return (
+                !decoded.match(/\/\.+(?:[\/\\?#]|$)/) &&
+                allowedIframes.some((i) => {
+                  const regex = i
+                    // escape regex, keeping *
+                    .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+                    .replace(/\*/g, "[^/?#\\\\]+");
+                  const allowedIframe = new RegExp(`^${regex}.*$`, "i");
+                  return iframeUrls.every((iframeUrl) =>
+                    allowedIframe.test(iframeUrl)
+                  );
+                })
+              );
+            })())
         ) {
           return attr(name, value);
         }

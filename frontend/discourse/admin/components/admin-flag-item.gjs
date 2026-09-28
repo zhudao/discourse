@@ -4,17 +4,18 @@ import { tracked } from "@glimmer/tracking";
 import { fn } from "@ember/helper";
 import { on } from "@ember/modifier";
 import { action } from "@ember/object";
+import { LinkTo } from "@ember/routing";
 import { service } from "@ember/service";
-import { htmlSafe } from "@ember/template";
+import { trustHTML } from "@ember/template";
 import { SYSTEM_FLAG_IDS } from "discourse/admin/lib/constants";
-import DButton from "discourse/components/d-button";
-import DToggleSwitch from "discourse/components/d-toggle-switch";
-import DropdownMenu from "discourse/components/dropdown-menu";
 import DMenu from "discourse/float-kit/components/d-menu";
-import concatClass from "discourse/helpers/concat-class";
 import { ajax } from "discourse/lib/ajax";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import { not } from "discourse/truth-helpers";
+import DButton from "discourse/ui-kit/d-button";
+import DDropdownMenu from "discourse/ui-kit/d-dropdown-menu";
+import DToggleSwitch from "discourse/ui-kit/d-toggle-switch";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
 import { i18n } from "discourse-i18n";
 
 export default class AdminFlagItem extends Component {
@@ -29,7 +30,7 @@ export default class AdminFlagItem extends Component {
   }
 
   get canEdit() {
-    return !Object.values(SYSTEM_FLAG_IDS).includes(this.args.flag.id);
+    return !this.args.flag.system;
   }
 
   get canDelete() {
@@ -46,13 +47,6 @@ export default class AdminFlagItem extends Component {
     return this.canDelete
       ? "admin.config_areas.flags.form.delete_flag"
       : "admin.config_areas.flags.form.non_deletable";
-  }
-
-  get editUrl() {
-    if (!this.canEdit) {
-      return null;
-    }
-    return this.router.urlFor("adminConfig.flags.edit", this.args.flag);
   }
 
   @action
@@ -128,34 +122,42 @@ export default class AdminFlagItem extends Component {
 
   <template>
     <tr
-      class={{concatClass
+      class={{dConcatClass
         "d-table__row admin-flag-item"
         @flag.name_key
         (if this.isSaved "saved")
       }}
     >
       <td class="d-table__cell --overview">
-        {{#if this.editUrl}}
-          <a
-            class="d-table__overview-name admin-flag-item__name"
-            href={{this.editUrl}}
-          >{{@flag.name}}</a>
+        {{#if this.canEdit}}
+          <LinkTo
+            class="d-table__overview-link"
+            @model={{@flag}}
+            @route="adminConfig.flags.edit"
+          >
+            <div
+              class="d-table__overview-name admin-flag-item__name"
+            >{{@flag.name}}</div>
+            <div class="d-table__overview-about">{{trustHTML
+                @flag.description
+              }}</div>
+          </LinkTo>
         {{else}}
           <div
             class="d-table__overview-name admin-flag-item__name"
           >{{@flag.name}}</div>
+          <div class="d-table__overview-about">{{trustHTML
+              @flag.description
+            }}</div>
         {{/if}}
-        <div class="d-table__overview-about">{{htmlSafe
-            @flag.description
-          }}</div>
       </td>
       <td class="d-table__cell --detail">
         <div class="d-table__mobile-label">
           {{i18n "admin.config_areas.flags.enabled"}}
         </div>
         <DToggleSwitch
-          @state={{this.enabled}}
           class="admin-flag-item__toggle {{@flag.name_key}}"
+          @state={{this.enabled}}
           {{on "click" (fn this.toggleFlagEnabled @flag)}}
         />
       </td>
@@ -165,53 +167,53 @@ export default class AdminFlagItem extends Component {
           <DButton
             class="btn-default btn-small admin-flag-item__edit"
             @action={{this.edit}}
-            @label="admin.config_areas.flags.edit"
             @disabled={{not this.canEdit}}
+            @label="admin.config_areas.flags.edit"
             @title={{this.editTitle}}
           />
 
           {{#if this.canMove}}
             <DMenu
-              @identifier="flag-menu"
-              @title={{i18n "admin.config_areas.flags.more_options.title"}}
               @icon="ellipsis-vertical"
+              @identifier="flag-menu"
               @onRegisterApi={{this.onRegisterApi}}
-              @class="btn-default"
+              @title={{i18n "admin.config_areas.flags.more_options.title"}}
+              @triggerClass="btn-default"
             >
               <:content>
-                <DropdownMenu as |dropdown|>
+                <DDropdownMenu as |dropdown|>
                   {{#unless @isFirstFlag}}
                     <dropdown.item>
                       <DButton
-                        @label="admin.config_areas.flags.more_options.move_up"
-                        @icon="arrow-up"
                         class="btn-transparent admin-flag-item__move-up"
                         @action={{this.moveUp}}
+                        @icon="arrow-up"
+                        @label="admin.config_areas.flags.more_options.move_up"
                       />
                     </dropdown.item>
                   {{/unless}}
                   {{#unless @isLastFlag}}
                     <dropdown.item>
                       <DButton
-                        @label="admin.config_areas.flags.more_options.move_down"
-                        @icon="arrow-down"
                         class="btn-transparent admin-flag-item__move-down"
                         @action={{this.moveDown}}
+                        @icon="arrow-down"
+                        @label="admin.config_areas.flags.more_options.move_down"
                       />
                     </dropdown.item>
                   {{/unless}}
 
                   <dropdown.item>
                     <DButton
-                      @label="admin.config_areas.flags.delete"
-                      @icon="trash-can"
                       class="btn-transparent --danger admin-flag-item__delete"
                       @action={{this.delete}}
                       @disabled={{not this.canDelete}}
+                      @icon="trash-can"
+                      @label="admin.config_areas.flags.delete"
                       @title={{this.deleteTitle}}
                     />
                   </dropdown.item>
-                </DropdownMenu>
+                </DDropdownMenu>
               </:content>
             </DMenu>
           {{/if}}

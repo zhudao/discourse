@@ -7,7 +7,7 @@ import Form from "discourse/components/form";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import { removeValueFromArray } from "discourse/lib/array-tools";
 import getURL from "discourse/lib/get-url";
-import { and, gt } from "discourse/truth-helpers";
+import { and, eq, gt } from "discourse/truth-helpers";
 import { i18n } from "discourse-i18n";
 import { toPlainObject } from "../lib/utilities";
 import AiSecretSelector from "./ai-secret-selector";
@@ -30,6 +30,12 @@ export default class AiToolEditorForm extends Component {
     { name: "number", id: "number" },
     { name: "boolean", id: "boolean" },
     { name: "array", id: "array" },
+  ];
+
+  ITEM_TYPES = [
+    { name: "string", id: "string" },
+    { name: "number", id: "number" },
+    { name: "boolean", id: "boolean" },
   ];
 
   get formData() {
@@ -82,6 +88,12 @@ export default class AiToolEditorForm extends Component {
     return this.args.secrets || [];
   }
 
+  get ragUploadsDescription() {
+    return this.siteSettings.rag_images_enabled
+      ? i18n("discourse_ai.rag.uploads.description_with_images")
+      : i18n("discourse_ai.rag.uploads.description");
+  }
+
   @action
   toggleIsEnum(value, { name, parentName, set }) {
     if (value) {
@@ -101,6 +113,9 @@ export default class AiToolEditorForm extends Component {
           delete parameter.enum;
         }
         delete parameter.isEnum;
+        if (parameter.type !== "array") {
+          delete parameter.item_type;
+        }
       });
     }
 
@@ -206,12 +221,6 @@ export default class AiToolEditorForm extends Component {
     return data.parameters[index].type;
   }
 
-  get ragUploadsDescription() {
-    return this.siteSettings.rag_images_enabled
-      ? i18n("discourse_ai.rag.uploads.description_with_images")
-      : i18n("discourse_ai.rag.uploads.description");
-  }
-
   @action
   exportTool() {
     const exportUrl = `/admin/plugins/discourse-ai/ai-tools/${this.args.model.id}/export.json`;
@@ -220,61 +229,65 @@ export default class AiToolEditorForm extends Component {
 
   <template>
     <Form
-      @onSubmit={{this.save}}
-      @data={{this.formData}}
       class="ai-tool-editor"
+      @data={{this.formData}}
+      @onSubmit={{this.save}}
       as |form data|
     >
       {{! NAME }}
       <form.Field
+        @format="large"
         @name="name"
         @title={{i18n "discourse_ai.tools.name"}}
-        @validation="required|length:1,100"
-        @format="large"
         @tooltip={{i18n "discourse_ai.tools.name_help"}}
+        @type="input"
+        @validation="required|length:1,100"
         as |field|
       >
-        <field.Input class="ai-tool-editor__name" />
+        <field.Control class="ai-tool-editor__name" />
       </form.Field>
 
       {{! TOOL NAME }}
       <form.Field
+        @format="large"
         @name="tool_name"
         @title={{i18n "discourse_ai.tools.tool_name"}}
-        @validation="required|length:1,100"
-        @format="large"
         @tooltip={{i18n "discourse_ai.tools.tool_name_help"}}
+        @type="input"
+        @validation="required|length:1,100"
         as |field|
       >
-        <field.Input class="ai-tool-editor__tool_name" />
+        <field.Control class="ai-tool-editor__tool_name" />
       </form.Field>
 
       {{! DESCRIPTION }}
       <form.Field
+        @format="full"
         @name="description"
         @title={{i18n "discourse_ai.tools.description"}}
-        @validation="required|length:1,1000"
-        @format="full"
         @tooltip={{i18n "discourse_ai.tools.description_help"}}
+        @type="textarea"
+        @validation="required|length:1,1000"
         as |field|
       >
-        <field.Textarea
-          @height={{60}}
+        <field.Control
           class="ai-tool-editor__description"
           placeholder={{i18n "discourse_ai.tools.description_help"}}
+          @height={{60}}
         />
       </form.Field>
 
       {{! SUMMARY }}
       <form.Field
+        @format="large"
         @name="summary"
         @title={{i18n "discourse_ai.tools.summary"}}
-        @validation="required|length:1,255"
-        @format="large"
         @tooltip={{i18n "discourse_ai.tools.summary_help"}}
+        @type="input"
+        @validation="required|length:1,255"
         as |field|
       >
-        <field.Input class="ai-tool-editor__summary" />
+        <field.Control class="ai-tool-editor__summary" />
       </form.Field>
 
       {{! PARAMETERS }}
@@ -283,45 +296,68 @@ export default class AiToolEditorForm extends Component {
           <form.Row as |row|>
             <row.Col @size={{6}}>
               <collection.Field
+                @format="full"
                 @name="name"
                 @title={{i18n "discourse_ai.tools.parameter_name"}}
+                @type="input"
                 @validation="required|length:1,100"
-                @format="full"
                 as |field|
               >
-                <field.Input />
+                <field.Control />
               </collection.Field>
             </row.Col>
 
             <row.Col @size={{6}}>
               <collection.Field
+                @format="full"
                 @name="type"
                 @title={{i18n "discourse_ai.tools.parameter_type"}}
+                @type="select"
                 @validation="required"
-                @format="full"
                 as |field|
               >
-                <field.Select as |select|>
+                <field.Control as |select|>
                   {{#each this.PARAMETER_TYPES as |type|}}
                     <select.Option
                       @value={{type.id}}
                     >{{type.name}}</select.Option>
                   {{/each}}
-                </field.Select>
+                </field.Control>
               </collection.Field>
             </row.Col>
+
+            {{#if (eq collectionData.type "array")}}
+              <row.Col @size={{6}}>
+                <collection.Field
+                  @format="full"
+                  @name="item_type"
+                  @title={{i18n "discourse_ai.tools.parameter_item_type"}}
+                  @type="select"
+                  as |field|
+                >
+                  <field.Control as |select|>
+                    {{#each this.ITEM_TYPES as |type|}}
+                      <select.Option
+                        @value={{type.id}}
+                      >{{type.name}}</select.Option>
+                    {{/each}}
+                  </field.Control>
+                </collection.Field>
+              </row.Col>
+            {{/if}}
           </form.Row>
 
           <form.Row as |row|>
             <row.Col @size={{12}}>
               <collection.Field
+                @format="full"
                 @name="description"
                 @title={{i18n "discourse_ai.tools.parameter_description"}}
+                @type="input"
                 @validation="required|length:1,1000"
-                @format="full"
                 as |field|
               >
-                <field.Input class="ai-tool-editor__parameter-description" />
+                <field.Control class="ai-tool-editor__parameter-description" />
               </collection.Field>
             </row.Col>
           </form.Row>
@@ -330,21 +366,23 @@ export default class AiToolEditorForm extends Component {
             <row.Col>
               <collection.Field
                 @name="required"
-                @title={{i18n "discourse_ai.ai_tool.parameter_required"}}
+                @title={{i18n "discourse_ai.tools.parameter_required"}}
+                @type="checkbox"
                 as |field|
               >
-                <field.Checkbox />
+                <field.Control />
               </collection.Field>
             </row.Col>
 
             <row.Col>
               <collection.Field
                 @name="isEnum"
-                @title={{i18n "discourse_ai.ai_tool.parameter_enum"}}
                 @onSet={{this.toggleIsEnum}}
+                @title={{i18n "discourse_ai.tools.parameter_enum"}}
+                @type="checkbox"
                 as |field|
               >
-                <field.Checkbox />
+                <field.Control />
               </collection.Field>
             </row.Col>
 
@@ -354,10 +392,11 @@ export default class AiToolEditorForm extends Component {
                   <form.Container class="ai-tool-parameter__enum-values">
                     <child.Field
                       @title={{i18n "discourse_ai.tools.enum_value"}}
+                      @type="input"
                       @validation="required"
                       as |field|
                     >
-                      <field.Input />
+                      <field.Control />
 
                       {{#if
                         (and
@@ -366,8 +405,8 @@ export default class AiToolEditorForm extends Component {
                       }}
                         <form.Button
                           class="btn-danger"
-                          @icon="trash-can"
                           @action={{fn child.remove childIndex}}
+                          @icon="trash-can"
                         />
                       {{/if}}
                     </child.Field>
@@ -377,13 +416,13 @@ export default class AiToolEditorForm extends Component {
 
               <row.Col @size={{8}}>
                 <form.Button
-                  @icon="plus"
-                  @label="discourse_ai.tools.add_enum_value"
                   @action={{fn
                     form.addItemToCollection
                     (concat "parameters." index ".enum")
                     ""
                   }}
+                  @icon="plus"
+                  @label="discourse_ai.tools.add_enum_value"
                 />
               </row.Col>
             {{/if}}
@@ -391,10 +430,10 @@ export default class AiToolEditorForm extends Component {
           <form.Row as |row|>
             <row.Col class="ai-tool-parameter-actions">
               <form.Button
-                @label="discourse_ai.tools.remove_parameter"
-                @icon="trash-can"
-                @action={{fn collection.remove index}}
                 class="btn-danger"
+                @action={{fn collection.remove index}}
+                @icon="trash-can"
+                @label="discourse_ai.tools.remove_parameter"
               />
             </row.Col>
           </form.Row>
@@ -402,8 +441,7 @@ export default class AiToolEditorForm extends Component {
       </form.Collection>
 
       <form.Button
-        @icon="plus"
-        @label="discourse_ai.tools.add_parameter"
+        class="btn-default"
         @action={{fn
           form.addItemToCollection
           "parameters"
@@ -411,7 +449,8 @@ export default class AiToolEditorForm extends Component {
             name="" type="string" description="" required=false isEnum=false
           )
         }}
-        class="btn-default"
+        @icon="plus"
+        @label="discourse_ai.tools.add_parameter"
       />
 
       {{! CREDENTIAL CONTRACTS }}
@@ -420,31 +459,33 @@ export default class AiToolEditorForm extends Component {
           <form.Row as |row|>
             <row.Col @size={{6}}>
               <collection.Field
+                @format="full"
                 @name="alias"
                 @title={{i18n "discourse_ai.tools.secret_alias"}}
-                @validation="required|length:1,100"
-                @format="full"
                 @tooltip={{i18n "discourse_ai.tools.secret_alias_help"}}
+                @type="input"
+                @validation="required|length:1,100"
                 as |field|
               >
-                <field.Input />
+                <field.Control />
               </collection.Field>
             </row.Col>
 
             <row.Col @size={{6}}>
               <collection.Field
+                @format="full"
                 @name="ai_secret_id"
                 @title={{i18n "discourse_ai.tools.secret_credential"}}
-                @format="full"
+                @type="custom"
                 as |field|
               >
-                <field.Custom>
+                <field.Control>
                   <AiSecretSelector
-                    @value={{field.value}}
-                    @secrets={{this.secretOptions}}
                     @onChange={{field.set}}
+                    @secrets={{this.secretOptions}}
+                    @value={{field.value}}
                   />
-                </field.Custom>
+                </field.Control>
               </collection.Field>
             </row.Col>
           </form.Row>
@@ -452,10 +493,10 @@ export default class AiToolEditorForm extends Component {
           <form.Row as |row|>
             <row.Col class="ai-tool-secret-contract__actions">
               <form.Button
-                @label="discourse_ai.tools.remove_secret_contract"
-                @icon="trash-can"
-                @action={{fn collection.remove index}}
                 class="btn-danger"
+                @action={{fn collection.remove index}}
+                @icon="trash-can"
+                @label="discourse_ai.tools.remove_secret_contract"
               />
             </row.Col>
           </form.Row>
@@ -463,75 +504,77 @@ export default class AiToolEditorForm extends Component {
       </form.Collection>
 
       <form.Button
-        @icon="plus"
-        @label="discourse_ai.tools.add_secret_contract"
+        class="btn-default"
         @action={{fn
           form.addItemToCollection
           "secret_contracts"
           (hash alias="" ai_secret_id=null)
         }}
-        class="btn-default"
+        @icon="plus"
+        @label="discourse_ai.tools.add_secret_contract"
       />
 
       {{! SCRIPT }}
       <form.Field
+        @format="full"
         @name="script"
         @title={{i18n "discourse_ai.tools.script"}}
+        @type="code"
         @validation="required|length:1,100000"
-        @format="full"
         as |field|
       >
-        <field.Code @lang="javascript" @height={{600}} />
+        <field.Control @height={{600}} @lang="javascript" />
       </form.Field>
 
       {{! UPLOADS }}
       {{#if this.siteSettings.ai_embeddings_enabled}}
         <form.Field
+          @format="full"
           @name="rag_uploads"
           @title={{i18n "discourse_ai.rag.uploads.title"}}
           @tooltip={{this.ragUploadsDescription}}
-          @format="full"
+          @type="custom"
           as |field|
         >
-          <field.Custom>
+          <field.Control>
             <RagUploader
+              @allowImages={{@settings.rag_images_enabled}}
+              @onRemove={{fn this.removeUpload form}}
               @target={{@editingModel}}
               @updateUploads={{fn this.updateUploads form.addItemToCollection}}
-              @onRemove={{fn this.removeUpload form}}
-              @allowImages={{@settings.rag_images_enabled}}
             />
             <RagOptionsFk
-              @form={{form}}
-              @data={{data}}
-              @llms={{@llms}}
               @allowImages={{@settings.rag_images_enabled}}
+              @data={{data}}
+              @form={{form}}
+              @llms={{@llms}}
             />
-          </field.Custom>
+          </field.Control>
         </form.Field>
       {{/if}}
 
       <form.Actions>
         <form.Submit
-          @label="discourse_ai.tools.save"
           class="ai-tool-editor__save"
+          @label="discourse_ai.tools.save"
         />
 
         {{#unless @isNew}}
           <form.Button
-            @label="discourse_ai.tools.test"
-            @action={{fn this.openTestModal data}}
             class="btn-default ai-tool-editor__test-button"
+            @action={{fn this.openTestModal data}}
+            @label="discourse_ai.tools.test"
           />
           <form.Button
-            @label="discourse_ai.tools.export"
-            @action={{this.exportTool}}
             class="btn-default ai-tool-editor__export"
+            @action={{this.exportTool}}
+            @label="discourse_ai.tools.export"
           />
           <form.Button
-            @label="discourse_ai.tools.delete"
-            @icon="trash-can"
-            @action={{this.delete}}
             class="btn-danger ai-tool-editor__delete"
+            @action={{this.delete}}
+            @icon="trash-can"
+            @label="discourse_ai.tools.delete"
           />
         {{/unless}}
       </form.Actions>

@@ -3,7 +3,9 @@ import { tracked } from "@glimmer/tracking";
 import { concat } from "@ember/helper";
 import { action } from "@ember/object";
 import { LinkTo } from "@ember/routing";
-import DButton from "discourse/components/d-button";
+import GroupLink from "discourse/components/group-link";
+import { groupPath } from "discourse/lib/url";
+import DButton from "discourse/ui-kit/d-button";
 import { i18n } from "discourse-i18n";
 
 class ExpandableList extends Component {
@@ -58,8 +60,8 @@ class ExpandableList extends Component {
     {{#if this.hasMore}}
       <DButton
         class="btn-flat ai-expanded-list__toggle-button"
-        @translatedLabel={{this.expandToggleLabel}}
         @action={{this.toggleExpanded}}
+        @translatedLabel={{this.expandToggleLabel}}
       />
     {{/if}}
   </template>
@@ -75,10 +77,10 @@ export default class AiFeatureCard extends Component {
   groupList(feature) {
     const groups = [];
     const groupIds = new Set();
-    if (feature.personas) {
-      feature.personas.forEach((persona) => {
-        if (persona.allowed_groups) {
-          persona.allowed_groups.forEach((group) => {
+    if (feature.agents) {
+      feature.agents.forEach((agent) => {
+        if (agent.allowed_groups) {
+          agent.allowed_groups.forEach((group) => {
             if (!groupIds.has(group.id)) {
               groupIds.add(group.id);
               groups.push(group);
@@ -102,30 +104,27 @@ export default class AiFeatureCard extends Component {
             <span>{{i18n "discourse_ai.features.disabled"}}</span>
           {{/unless}}
         </div>
-        <div class="ai-feature-card__persona">
+        <div class="ai-feature-card__agent">
           <span class="ai-feature-card__label">
-            {{i18n
-              "discourse_ai.features.persona"
-              count=@feature.personas.length
-            }}
+            {{i18n "discourse_ai.features.agent" count=@feature.agents.length}}
           </span>
-          {{#if @feature.personas}}
+          {{#if @feature.agents}}
             <ExpandableList
-              @items={{@feature.personas}}
+              @items={{@feature.agents}}
               @maxItemsToShow={{5}}
-              as |persona index isLastItem|
+              as |agent index isLastItem|
             >
               <LinkTo
-                @route="adminPlugins.show.discourse-ai-personas.edit"
-                @model={{persona.id}}
-                class="ai-feature-card__persona-link"
+                class="ai-feature-card__agent-link"
+                @model={{agent.id}}
+                @route="adminPlugins.show.discourse-ai-agents.edit"
               >
-                {{concat persona.name (unless (isLastItem index) ", ")}}
+                {{concat agent.name (unless (isLastItem index) ", ")}}
               </LinkTo>
             </ExpandableList>
           {{else}}
             <span class="ai-feature-card__label">
-              {{i18n "discourse_ai.features.no_persona"}}
+              {{i18n "discourse_ai.features.no_agent"}}
             </span>
           {{/if}}
         </div>
@@ -143,9 +142,9 @@ export default class AiFeatureCard extends Component {
               as |llm index isLastItem|
             >
               <LinkTo
-                @route="adminPlugins.show.discourse-ai-llms.edit"
-                @model={{llm.id}}
                 class="ai-feature-card__llm-link"
+                @model={{llm.id}}
+                @route="adminPlugins.show.discourse-ai-llms.edit"
               >
                 {{concat llm.name (unless (isLastItem index) ", ")}}
               </LinkTo>
@@ -157,7 +156,7 @@ export default class AiFeatureCard extends Component {
           {{/if}}
         </div>
         {{#if @showGroups}}
-          {{#if @feature.personas}}
+          {{#if @feature.agents}}
             <div class="ai-feature-card__groups">
               <span class="ai-feature-card__label">
                 {{i18n "discourse_ai.features.groups"}}
@@ -165,7 +164,15 @@ export default class AiFeatureCard extends Component {
               {{#if (this.hasGroups @feature)}}
                 <ul class="ai-feature-card__item-groups">
                   {{#each (this.groupList @feature) as |group|}}
-                    <li>{{group.name}}</li>
+                    <li>
+                      <GroupLink
+                        class="mention-group"
+                        @href={{groupPath group.name}}
+                        @name={{group.name}}
+                      >
+                        {{group.name}}
+                      </GroupLink>
+                    </li>
                   {{/each}}
                 </ul>
               {{else}}

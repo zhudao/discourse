@@ -1,34 +1,36 @@
-import { readOnly } from "@ember/object/computed";
-import discourseComputed from "discourse/lib/decorators";
+import RestCompatModel from "discourse/data/rest-compat";
+import { TagSchema } from "discourse/data/schemas/tag";
+import { defineFieldForwarders } from "discourse/data/warp-rest-model";
 import getURL from "discourse/lib/get-url";
-import RestModel from "discourse/models/rest";
 
-export default class Tag extends RestModel {
-  @readOnly("pm_only") pmOnly;
+export default class Tag extends RestCompatModel {
+  static type = "tag";
 
-  @discourseComputed("slug", "id")
-  url(slug, id) {
-    if (id) {
-      const slugForUrl = slug || `${id}-tag`;
-      return getURL(`/tag/${slugForUrl}/${id}`);
+  get pmOnly() {
+    return this.pm_only;
+  }
+
+  get url() {
+    if (this.id) {
+      const slugForUrl = this.slug || `${this.id}-tag`;
+      return getURL(`/tag/${slugForUrl}/${this.id}`);
     }
     // fallback for tags without id (legacy)
-    return getURL(`/tag/${this.name}`);
+    return getURL(`/tag/${this.name.replaceAll(".", "%2E")}`);
   }
 
-  @discourseComputed("count", "pm_count")
-  totalCount(count, pmCount) {
-    return pmCount ? count + pmCount : count;
+  get totalCount() {
+    return this.pm_count ? this.count + this.pm_count : this.count;
   }
 
-  @discourseComputed("id", "name")
-  searchContext(id, name) {
+  get searchContext() {
     return {
       type: "tag",
-      id,
-      /** @type Tag */
-      tag: this,
-      name,
+      id: this.id,
+      tag: /** @type {Tag} */ (this),
+      name: this.name,
     };
   }
 }
+
+defineFieldForwarders(Tag, TagSchema);

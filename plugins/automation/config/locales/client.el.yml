@@ -169,9 +169,6 @@ el:
               description: "Προαιρετικό, περιορίστε το έναυσμα μόνο σε αναρτήσεις με αυτά τα χαρακτηριστικά"
           created: Δημιουργήθηκε
           edited: Επεξεργάστηκε
-          topics: Όλα τα θέματα
-          personal_messages: Προσωπικά μηνύματα
-          public_topics: Δημόσια θέματα (εξαιρούνται όλες οι ασφαλείς κατηγορίες)
           with_images: Εικόνες
           with_links: Σύνδεσμοι
           with_code: Κωδικός
@@ -366,6 +363,9 @@ el:
           runs_today: "%{count} σήμερα"
           runs_this_week: "%{count} αυτή την εβδομάδα"
           runs_this_month: "%{count} αυτό τον μήνα"
+          recent_errors:
+            one: "%{count} σφάλμα πρόσφατα"
+            other: "%{count} σφάλματα πρόσφατα"
           runs:
             label: Εκτελέσεις
           name:

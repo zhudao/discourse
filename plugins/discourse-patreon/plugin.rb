@@ -16,9 +16,6 @@ register_asset "stylesheets/patreon.scss"
 register_svg_icon "fab-patreon"
 register_svg_icon "patreon-new"
 
-# Site setting validators must be loaded before initialize
-require_relative "lib/validators/patreon_login_enabled_validator"
-
 module ::Patreon
   PLUGIN_NAME = "discourse-patreon"
 end
@@ -28,13 +25,16 @@ require_relative "lib/discourse_patreon/engine"
 after_initialize do
   require_dependency "admin_constraint"
 
+  require_relative "lib/api_version/v1"
+  require_relative "lib/api_version/v2"
+  require_relative "lib/api"
   require_relative "app/controllers/patreon/patreon_admin_controller"
   require_relative "app/controllers/patreon/patreon_webhook_controller"
   require_relative "app/jobs/regular/sync_patron_groups"
   require_relative "app/jobs/scheduled/patreon_sync_patrons_to_groups"
   require_relative "app/jobs/scheduled/patreon_update_tokens"
   require_relative "app/services/problem_check/access_token_invalid"
-  require_relative "lib/api"
+  require_relative "app/services/problem_check/patreon_api_v1_deprecated"
   require_relative "lib/seed"
   require_relative "lib/campaign"
   require_relative "lib/pledge"
@@ -43,10 +43,11 @@ after_initialize do
 
   Discourse::Application.routes.prepend { mount Patreon::Engine, at: "/patreon" }
 
-  add_admin_route "patreon.title", "patreon"
+  add_admin_route "patreon.title", "discourse-patreon", use_new_show_route: true
 
   Discourse::Application.routes.append do
-    get "/admin/plugins/patreon" => "admin/plugins#index", :constraints => AdminConstraint.new
+    get "/admin/plugins/discourse-patreon/filters" => "admin/plugins#index",
+        :constraints => AdminConstraint.new
     get "/admin/plugins/patreon/list" => "patreon/patreon_admin#list",
         :constraints => AdminConstraint.new
     get "/u/:username/patreon_email" => "patreon/patreon_admin#email",
@@ -71,7 +72,7 @@ after_initialize do
         Patreon::Patron.update_local_user(user, patreon_id, true)
       rescue => e
         Rails.logger.warn(
-          "Patreon group membership callback failed for new user #{self.id} with error: #{e}.\n\n #{e.backtrace.join("\n")}",
+          "Patreon group membership callback failed for new user #{id} with error: #{e}.\n\n #{e.backtrace.join("\n")}",
         )
       end
     end
@@ -80,7 +81,7 @@ after_initialize do
   Patreon::USER_DETAIL_FIELDS.each do |attribute|
     add_to_serializer(
       :admin_detailed_user,
-      "patreon_#{attribute}".to_sym,
+      :"patreon_#{attribute}",
       include_condition: -> do
         Patreon::Patron.attr(attribute, object).present? &&
           (attribute != "amount_cents" || scope.is_admin?)
@@ -99,6 +100,7 @@ after_initialize do
   end
 
   register_problem_check ProblemCheck::AccessTokenInvalid
+  register_problem_check ProblemCheck::PatreonApiV1Deprecated
 end
 
 # Authentication with Patreon
@@ -108,7 +110,8 @@ class ::OmniAuth::Strategies::Patreon < ::OmniAuth::Strategies::OAuth2
   option :client_options,
          site: "https://www.patreon.com",
          authorize_url: "https://www.patreon.com/oauth2/authorize",
-         token_url: "https://api.patreon.com/oauth2/token"
+         token_url: "https://api.patreon.com/oauth2/token",
+         auth_scheme: :request_body
 
   option :authorize_params, response_type: "code"
 
@@ -137,7 +140,7 @@ class ::OmniAuth::Strategies::Patreon < ::OmniAuth::Strategies::OAuth2
         response =
           client.request(
             :get,
-            "https://api.patreon.com/oauth2/api/current_user",
+            Patreon::ApiVersion.current.oauth_identity_url,
             headers: {
               "Authorization" => "Bearer #{access_token.token}",
             },
@@ -162,6 +165,7 @@ class Auth::PatreonAuthenticator < Auth::ManagedAuthenticator
                       setup:
                         lambda { |env|
                           strategy = env["omniauth.strategy"]
+                          adapter = Patreon::ApiVersion.current
                           strategy.options[:client_id] = SiteSetting.patreon_client_id
                           strategy.options[:client_secret] = SiteSetting.patreon_client_secret
                           strategy.options[
@@ -170,6 +174,8 @@ class Auth::PatreonAuthenticator < Auth::ManagedAuthenticator
                           strategy.options[
                             :provider_ignores_state
                           ] = SiteSetting.patreon_login_ignore_state
+                          strategy.options[:client_options][:token_url] = adapter.oauth_token_url
+                          strategy.options[:authorize_params] = adapter.oauth_authorize_params
                         }
   end
 
@@ -186,8 +192,12 @@ class Auth::PatreonAuthenticator < Auth::ManagedAuthenticator
     result
   end
 
-  def enabled?
-    SiteSetting.patreon_login_enabled
+  def enable_setting
+    :patreon_login_enabled
+  end
+
+  def required_settings
+    %i[patreon_client_id patreon_client_secret patreon_creator_discourse_username]
   end
 
   def primary_email_verified?(auth_token)
