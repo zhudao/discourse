@@ -50,6 +50,12 @@ module DiscourseWorkflows
       },
     }.freeze
 
+    def self.actor_property(allow_anonymous: true, **options)
+      property = { type: :string, required: false, default: "system", ui: { control: :actor } }
+      property[:control_options] = { allow_anonymous: false } if !allow_anonymous
+      { actor_username: property.merge(options) }
+    end
+
     DESCRIPTION_DEFAULTS = {
       version: "1.0",
       defaults: {
@@ -393,6 +399,11 @@ module DiscourseWorkflows
 
     def category_ids_parameter(trigger_ctx)
       self.class.category_ids_parameter(trigger_ctx)
+    end
+
+    def matches_changes?(trigger_ctx, change)
+      changes = Array.wrap(trigger_ctx.get_node_parameter("changes", [])).compact_blank.map(&:to_s)
+      changes.empty? || changes.include?(change)
     end
 
     def matches_topic_filters?(topic, trigger_ctx)
