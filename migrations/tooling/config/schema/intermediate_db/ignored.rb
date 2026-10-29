@@ -132,7 +132,9 @@ Migrations::Tooling::Schema.ignored do
 
   tables :incoming_domains, :incoming_emails, :incoming_links, :incoming_referers
 
-  tables :reviewable_claimed_topics,
+  tables :dsa_notices,
+         :dsa_statement_of_records,
+         :reviewable_claimed_topics,
          :reviewable_histories,
          :reviewable_notes,
          :reviewable_scores,
@@ -194,6 +196,12 @@ Migrations::Tooling::Schema.ignored do
          :invited_users,
          :invites,
          :javascript_caches,
+         :live_co_presences,
+         :live_invites,
+         :live_recordings,
+         :live_room_memberships,
+         :live_rooms,
+         :live_sessions,
          :mcp_audit_logs,
          :mcp_group_scopes,
          :mcp_oauth_access_tokens,
@@ -240,12 +248,6 @@ Migrations::Tooling::Schema.ignored do
          :translation_overrides,
          :unsubscribe_keys,
          :upcoming_change_events,
-         :voice_co_presences,
-         :voice_invites,
-         :voice_recordings,
-         :voice_room_memberships,
-         :voice_rooms,
-         :voice_sessions,
          :watched_word_groups,
          :watched_words,
          :web_crawler_requests

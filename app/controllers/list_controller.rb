@@ -120,7 +120,7 @@ class ListController < ApplicationController
     end
 
     define_method("category_#{filter}") do
-      canonical_url "#{Discourse.base_url_no_prefix}#{@category.url}"
+      canonical_list_url(@category.url)
       public_send(filter, category: @category.id)
     end
 
@@ -132,7 +132,7 @@ class ListController < ApplicationController
   def filter
     topic_query_opts = { no_definitions: !SiteSetting.show_category_definitions_in_topic_lists }
 
-    %i[page q].each do |key|
+    %i[page q subset].each do |key|
       if params.key?(key.to_s)
         value = params[key]
         raise Discourse::InvalidParameters.new(key) if !TopicQuery.validate?(key, value)
@@ -149,7 +149,7 @@ class ListController < ApplicationController
   end
 
   def category_default
-    canonical_url "#{Discourse.base_url_no_prefix}#{@category.url}"
+    canonical_list_url(@category.url)
     public_send(category_default_view, category: @category.id)
   end
 

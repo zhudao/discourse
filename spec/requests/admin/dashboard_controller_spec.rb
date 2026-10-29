@@ -40,64 +40,6 @@ RSpec.describe Admin::DashboardController do
   end
 
   describe "#index" do
-    shared_examples "version info present" do
-      before { SiteSetting.dashboard_improvements = false }
-
-      it "returns discourse version info" do
-        get "/admin/dashboard.json"
-
-        expect(response.status).to eq(200)
-        expect(response.parsed_body["version_check"]).to be_present
-      end
-    end
-
-    shared_examples "version info absent" do
-      before do
-        SiteSetting.dashboard_improvements = false
-        SiteSetting.version_checks = false
-      end
-
-      it "does not return discourse version info" do
-        get "/admin/dashboard.json"
-
-        expect(response.status).to eq(200)
-        json = response.parsed_body
-        expect(json["version_check"]).not_to be_present
-      end
-    end
-
-    context "when logged in as an admin" do
-      before { sign_in(admin) }
-
-      context "when version checking is enabled" do
-        before { SiteSetting.version_checks = true }
-
-        include_examples "version info present"
-      end
-
-      context "when version checking is disabled" do
-        before { SiteSetting.version_checks = false }
-
-        include_examples "version info absent"
-      end
-    end
-
-    context "when logged in as a moderator" do
-      before { sign_in(moderator) }
-
-      context "when version checking is enabled" do
-        before { SiteSetting.version_checks = true }
-
-        include_examples "version info present"
-      end
-
-      context "when version checking is disabled" do
-        before { SiteSetting.version_checks = false }
-
-        include_examples "version info absent"
-      end
-    end
-
     context "when logged in as a non-staff user" do
       before { sign_in(user) }
 
@@ -379,39 +321,6 @@ RSpec.describe Admin::DashboardController do
         end
       end
 
-      it "is omitted when enabled for no one" do
-        SiteSetting.dashboard_improvements = false
-
-        get "/admin/dashboard.json"
-
-        expect(response.status).to eq(200)
-        expect(response.parsed_body["sections"]).to be_nil
-        expect(response.parsed_body["configuration"]).to be_nil
-      end
-
-      it "is omitted when enabled for a group the admin is not in" do
-        group = Fabricate(:group)
-        Fabricate(:site_setting_group, name: "dashboard_improvements", group_ids: group.id.to_s)
-
-        get "/admin/dashboard.json"
-
-        expect(response.status).to eq(200)
-        expect(response.parsed_body["sections"]).to be_nil
-        expect(response.parsed_body["configuration"]).to be_nil
-      end
-
-      it "is returned when enabled for the admin's group" do
-        group = Fabricate(:group)
-        group.add(admin)
-        Fabricate(:site_setting_group, name: "dashboard_improvements", group_ids: group.id.to_s)
-
-        get "/admin/dashboard.json"
-
-        expect(response.status).to eq(200)
-        expect(response.parsed_body["sections"]).to be_present
-        expect(response.parsed_body["configuration"]).to be_present
-      end
-
       it "falls back to default dates when date params are malformed" do
         get "/admin/dashboard.json", params: { start_date: "garbage", end_date: "also-garbage" }
 
@@ -559,17 +468,6 @@ RSpec.describe Admin::DashboardController do
         expect(response.status).to eq(200)
         expect(response.parsed_body).not_to have_key("version_check")
       end
-
-      it "includes version_check when the admin is not included" do
-        group = Fabricate(:group)
-        Fabricate(:site_setting_group, name: "dashboard_improvements", group_ids: group.id.to_s)
-        SiteSetting.version_checks = true
-
-        get "/admin/dashboard.json"
-
-        expect(response.status).to eq(200)
-        expect(response.parsed_body).to have_key("version_check")
-      end
     end
 
     describe "problems payload" do
@@ -689,16 +587,6 @@ RSpec.describe Admin::DashboardController do
         get "/admin/dashboard.json"
 
         expect(response.status).to eq(200)
-        expect(response.parsed_body).not_to have_key("configuration")
-      end
-
-      it "is omitted when the admin is not included" do
-        group = Fabricate(:group)
-        Fabricate(:site_setting_group, name: "dashboard_improvements", group_ids: group.id.to_s)
-        sign_in(admin)
-
-        get "/admin/dashboard.json"
-
         expect(response.parsed_body).not_to have_key("configuration")
       end
     end
@@ -2071,21 +1959,6 @@ RSpec.describe Admin::DashboardController do
         },
       )
     end
-
-    it "does not allow access while dashboard improvements are disabled" do
-      sign_in(admin)
-      SiteSetting.dashboard_improvements = false
-
-      get "/admin/dashboard/site-traffic-explorer.json", params: request_params
-
-      expect(status: response.status, body: response.parsed_body).to eq(
-        status: 404,
-        body: {
-          "errors" => ["The requested URL or resource could not be found."],
-          "error_type" => "not_found",
-        },
-      )
-    end
   end
 
   describe "#available_reports" do
@@ -2402,6 +2275,63 @@ RSpec.describe Admin::DashboardController do
         expect(response.status).to eq(204)
         rows = AdminDashboardReport.order(:position).pluck(:identifier, :rows, :cols)
         expect(rows).to eq([["a", 3, 2], ["b", 1, 1]])
+      end
+
+      it "uses explicit dimensions to reset an existing report to its default size" do
+        DiscoursePluginRegistry.register_admin_dashboard_report_source(fake_provider, plugin)
+        Fabricate(:tall_admin_dashboard_report, source: "fake_source", identifier: "a")
+
+        put "/admin/dashboard/reports/layout.json",
+            params: {
+              items: [{ source: "fake_source", identifier: "a", rows: 1, cols: 1 }],
+            }
+
+        expect(response.status).to eq(204)
+        expect(AdminDashboardReport.pluck(:rows, :cols)).to eq([[1, 1]])
+      end
+
+      it "keeps the omitted dimension when resizing an existing report" do
+        DiscoursePluginRegistry.register_admin_dashboard_report_source(fake_provider, plugin)
+        Fabricate(:tall_admin_dashboard_report, source: "fake_source", identifier: "a")
+
+        put "/admin/dashboard/reports/layout.json",
+            params: {
+              items: [{ source: "fake_source", identifier: "a", rows: 2 }],
+            }
+
+        expect(response.status).to eq(204)
+        expect(AdminDashboardReport.pluck(:rows, :cols)).to eq([[2, 2]])
+      end
+
+      it "rejects an invalid size formed by an explicit column span and retained rows" do
+        DiscoursePluginRegistry.register_admin_dashboard_report_source(fake_provider, plugin)
+        Fabricate(:tall_admin_dashboard_report, source: "fake_source", identifier: "a")
+
+        put "/admin/dashboard/reports/layout.json",
+            params: {
+              items: [{ source: "fake_source", identifier: "a", cols: 1 }],
+            }
+
+        expect(response.status).to eq(400)
+        expect(AdminDashboardReport.pluck(:rows, :cols)).to eq([[3, 2]])
+      end
+
+      it "defaults a new report's size when another source has the same identifier" do
+        DiscoursePluginRegistry.register_admin_dashboard_report_source(fake_provider, plugin)
+        Fabricate(:tall_admin_dashboard_report)
+
+        put "/admin/dashboard/reports/layout.json",
+            params: {
+              items: [
+                { source: "core_report", identifier: "signups" },
+                { source: "fake_source", identifier: "signups" },
+              ],
+            }
+
+        expect(response.status).to eq(204)
+        expect(AdminDashboardReport.order(:position).pluck(:source, :rows, :cols)).to eq(
+          [["core_report", 3, 2], ["fake_source", 1, 1]],
+        )
       end
 
       it "persists a single-row card that spans the full width" do

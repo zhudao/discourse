@@ -355,6 +355,46 @@ class Plugin::Instance
     TopicList.on_preload_user_ids(enabled: method(:enabled?), &block)
   end
 
+  # Preloads a user custom field for the users serialized by `/user-cards.json`,
+  # so it can be read while serializing them without N+1 queries. It is not
+  # added to the response.
+  #
+  # The field is preloaded under its string name, so read it with a string key
+  # (`user.custom_fields["field_name"]`). A symbol key raises a NotPreloadedError.
+  #
+  # @param field [String, Symbol] The name of the user custom field.
+  #
+  # @example
+  #   register_user_cards_preloaded_custom_field(:card_theme)
+  #
+  # @return [void]
+  def register_user_cards_preloaded_custom_field(field)
+    DiscoursePluginRegistry.register_user_cards_preloaded_custom_field(field.to_s, self)
+  end
+
+  # Allows plugins to load data for all the users serialized by `/user-cards.json`
+  # at once, instead of querying per user in their serializer attributes. The
+  # block runs after core has preloaded the users' associations and custom fields.
+  #
+  # @yieldparam users [Array<User>] The users that will be serialized.
+  # @yieldparam guardian [Guardian] The guardian of the requesting user.
+  #
+  # @example
+  #   add_to_class(:user, :muted_by_current_user=) { |muted| @muted_by_current_user = muted }
+  #   add_to_class(:user, :muted_by_current_user) { @muted_by_current_user }
+  #
+  #   register_user_cards_preloader do |users, guardian|
+  #     next if guardian.anonymous?
+  #
+  #     muted_ids = guardian.user.muted_users.where(id: users.map(&:id)).pluck(:id)
+  #     users.each { |user| user.muted_by_current_user = muted_ids.include?(user.id) }
+  #   end
+  #
+  # @return [void]
+  def register_user_cards_preloader(&block)
+    DiscoursePluginRegistry.register_user_cards_preloader(block, self)
+  end
+
   # Allow to eager load additional tables in Search. Useful to avoid N+1 performance problems.
   # Example usage:
   #   register_search_topic_eager_load do |opts|
@@ -1173,7 +1213,11 @@ class Plugin::Instance
   #
   # @param id [String, Symbol] stable identifier stored in the site setting
   # @param name [String] client-side translation key used in the admin setting
-  # @param path [String] application path for the homepage
+  # @param path [String, Proc] application path for the homepage, excluding any
+  #   subfolder, or a lambda returning one when it depends on settings. A lambda
+  #   is resolved when the site data is built; anonymous site data is cached
+  #   until a site setting changes, so call `Site.clear_anon_cache!` if the path
+  #   depends on anything else.
   # @param route [String] Rails controller action, in `controller#action` form
   # @param anonymous [Boolean] whether logged-out visitors may use this homepage
   # @param server_side [Boolean] whether navigation requires a full page request
@@ -1182,7 +1226,7 @@ class Plugin::Instance
   #   back to the top menu homepage
   # @param available [Proc, nil] called with `guardian:` and `request:` (which
   #   may be nil); when it returns false the visitor gets the regular top menu
-  #   homepage instead. It runs whenever the homepage is resolved, including on
+  #   homepage instead, and a lambda `path` is not sent to them. It runs whenever the homepage is resolved, including on
   #   page loads and topic list requests, so keep it cheap.
   def register_homepage(
     id,
@@ -1201,7 +1245,9 @@ class Plugin::Instance
             "homepage id must contain only lowercase letters, numbers, underscores, and hyphens"
     end
     raise ArgumentError, "homepage name must be present" if name.blank?
-    raise ArgumentError, "homepage path must start with /" if !path.to_s.start_with?("/")
+    if !path.respond_to?(:call) && !path.to_s.start_with?("/")
+      raise ArgumentError, "homepage path must start with /"
+    end
     if !route.to_s.match?(/\A[^#]+#[^#]+\z/)
       raise ArgumentError, "homepage route must use controller#action format"
     end
@@ -1230,7 +1276,7 @@ class Plugin::Instance
       {
         id: id,
         name: name,
-        path: path.to_s,
+        path: path.respond_to?(:call) ? path : path.to_s,
         route: route.to_s,
         anonymous: anonymous,
         server_side: server_side,

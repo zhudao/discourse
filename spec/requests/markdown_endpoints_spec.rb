@@ -12,8 +12,19 @@ RSpec.describe "Markdown endpoints" do
 
   after { category.clear_url_cache }
 
-  it "respects the upcoming change promotion policy and explicit opt-in" do
+  it "automatically enables Markdown endpoints when stable changes are promoted" do
     SiteSetting.promote_upcoming_changes_on_status = "stable"
+
+    get "/latest.md"
+    expect(response).to have_http_status(:ok)
+    expect(response.media_type).to eq("text/markdown")
+
+    get "/latest", headers: { "ACCEPT" => "text/html" }
+    expect(response.headers["Link"]).to include("/latest.md")
+  end
+
+  it "respects explicit opt-in when automatic promotion is disabled" do
+    SiteSetting.promote_upcoming_changes_on_status = "never"
 
     get "/latest.md"
     expect(response).to have_http_status(:not_found)
@@ -277,6 +288,40 @@ RSpec.describe "Markdown endpoints" do
     end
   end
 
+  it "lets plugins add topic sections between the metadata and the first post" do
+    plugin_instance = Plugin::Instance.new
+    modifier =
+      Proc.new do |sections, topic_view, guardian|
+        sections + ["## Plugin section", "Topic #{topic_view.topic.id} for #{guardian.user&.id}"]
+      end
+    DiscoursePluginRegistry.register_modifier(
+      plugin_instance,
+      :markdown_topic_header_sections,
+      &modifier
+    )
+
+    begin
+      get "/t/#{topic.slug}/#{topic.id}.md"
+
+      expect(response).to have_http_status(:ok)
+      body = response.body
+      expect(body).to include("**Page:** 1\n\n## Plugin section\n\nTopic #{topic.id} for \n\n")
+      expect(body.index("## Plugin section")).to be < body.index(post.raw)
+
+      get "/t/#{topic.slug}/#{topic.id}/1.md"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.body).to include(post.raw)
+      expect(response.body).not_to include("## Plugin section")
+    ensure
+      DiscoursePluginRegistry.unregister_modifier(
+        plugin_instance,
+        :markdown_topic_header_sections,
+        &modifier
+      )
+    end
+  end
+
   it "paginates rendered posts with translated Markdown navigation links" do
     TranslationOverride.upsert!("en", "markdown_endpoints.previous_page", "Earlier posts")
     TranslationOverride.upsert!("en", "markdown_endpoints.next_page", "Later posts")
@@ -314,6 +359,165 @@ RSpec.describe "Markdown endpoints" do
       "View the full topic",
     )
     expect(response.body).not_to include(post.raw, "[Next page]", "[Previous page]")
+  end
+
+  it "renders every core small action description even when its body is empty" do
+    descriptions = {
+      "topic_created" => "Created this topic",
+      "public_topic" => "Made this topic public",
+      "open_topic" => "Converted this to a topic",
+      "private_topic" => "Made this topic a personal message",
+      "split_topic" => "Split this topic",
+      "invited_user" => "Invited @action\\_target",
+      "invited_group" => "Invited @action\\_target",
+      "user_left" => "@action\\_target removed themselves from this message",
+      "removed_user" => "Removed @action\\_target",
+      "removed_group" => "Removed @action\\_target",
+      "autobumped" => "Automatically bumped",
+      "tags_changed" => "Tags updated",
+      "category_changed" => "Category updated",
+      "autoclosed.enabled" => "Closed",
+      "autoclosed.disabled" => "Opened",
+      "closed.enabled" => "Closed",
+      "closed.disabled" => "Opened",
+      "archived.enabled" => "Archived",
+      "archived.disabled" => "Unarchived",
+      "pinned.enabled" => "Pinned",
+      "pinned.disabled" => "Unpinned",
+      "pinned_globally.enabled" => "Pinned globally",
+      "pinned_globally.disabled" => "Unpinned",
+      "visible.enabled" => "Listed",
+      "visible.disabled" => "Unlisted",
+      "banner.enabled" => "Made this a banner",
+      "banner.disabled" => "Removed this banner",
+      "forwarded" => "Forwarded the above email",
+    }
+    descriptions.each_key do |action_code|
+      Fabricate(
+        :small_action,
+        topic:,
+        user:,
+        action_code:,
+        skip_validation: true,
+        raw: "",
+        cooked: "",
+        custom_fields: {
+          "action_code_who" => "action_target",
+        },
+        created_at: Time.utc(2026, 7, 15, 16, 30),
+      )
+    end
+
+    stub_const(TopicView, :CHUNK_SIZE, 50) { get "/t/#{topic.slug}/#{topic.id}.md" }
+
+    expect(response).to have_http_status(:ok)
+    bodies = response.body.scan(%r{</div>\n\n(.*?)(?=\n\n---|\z)}m).flatten.map(&:strip)
+    expected =
+      descriptions.values.map { |description| "#{description} on July 15, 2026, 4:30pm UTC" }
+    expected[-3] += ". It will appear at the top of every page until it is dismissed by the user."
+    expected[-2] += ". It will no longer appear at the top of every page."
+    expected[-1] = "Forwarded the above email"
+    expect(bodies).to eq([post.raw, *expected])
+  end
+
+  it "renders small action descriptions before custom messages in topics and individual posts" do
+    action =
+      Fabricate(
+        :small_action,
+        topic:,
+        user:,
+        action_code: "closed.enabled",
+        raw: "Please **stay on topic**.",
+      )
+
+    [
+      "/t/#{topic.slug}/#{topic.id}.md",
+      "/t/#{topic.slug}/#{topic.id}/#{action.post_number}.md",
+    ].each do |path|
+      get path
+
+      expect(response).to have_http_status(:ok)
+      expect(response.body).to match(
+        %r{</div>\n\nClosed on [^\n]+\n\nPlease \*\*stay on topic\*\*\.},
+      )
+    end
+  end
+
+  it "uses the app's conversion wording on login-required sites and the reader's timezone" do
+    SiteSetting.login_required = true
+    user.user_option.update!(timezone: "America/Toronto")
+    sign_in(user)
+    action =
+      Fabricate(
+        :small_action,
+        topic:,
+        user:,
+        action_code: "public_topic",
+        created_at: Time.utc(2026, 7, 15, 16, 30),
+      )
+
+    get "/t/#{topic.slug}/#{topic.id}/#{action.post_number}.md"
+
+    expect(response).to have_http_status(:ok)
+    expect(response.body).to include("Converted this to a topic on July 15, 2026, 12:30pm EDT")
+  end
+
+  it "renders plugin action translations as text and escapes action targets" do
+    I18n.backend.store_translations(
+      :en,
+      js: {
+        action_codes: {
+          test_action: "Assigned %{who} to <a href='%{path}'>this &amp; that</a> %{when}",
+        },
+      },
+    )
+    action =
+      Fabricate(
+        :small_action,
+        topic:,
+        user:,
+        action_code: "test_action",
+        custom_fields: {
+          "action_code_who" => "<b>target_name</b>",
+          "action_code_path" => "/t/#{topic.id}",
+        },
+      )
+
+    get "/t/#{topic.slug}/#{topic.id}/#{action.post_number}.md"
+
+    expect(response).to have_http_status(:ok)
+    expect(response.body).to include("Assigned @\\<b\\>target\\_name\\</b\\> to this & that on ")
+  ensure
+    I18n.reload!
+  end
+
+  it "renders action descriptions on whispers only for readers allowed to see them" do
+    action =
+      Fabricate(:whisper, topic:, user:, action_code: "closed.enabled", raw: "Private action")
+
+    get "/t/#{topic.slug}/#{topic.id}.md"
+
+    expect(response).to have_http_status(:ok)
+    expect(response.body).not_to include(action.raw, "Closed on ")
+
+    SiteSetting.whispers_allowed_groups = Group::AUTO_GROUPS[:trust_level_2]
+    sign_in(user)
+
+    get "/t/#{topic.slug}/#{topic.id}/#{action.post_number}.md"
+
+    expect(response).to have_http_status(:ok)
+    expect(response.body).to include("Closed on ", action.raw)
+  end
+
+  it "preserves the message when a small action code is absent or has no translation" do
+    [nil, "unknown_action"].each do |action_code|
+      action = Fabricate(:small_action, topic:, user:, action_code:, raw: "Custom action message")
+
+      get "/t/#{topic.slug}/#{topic.id}/#{action.post_number}.md"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.body).to include("</div>\n\n#{action.raw}\n\n---")
+    end
   end
 
   it "links topic and post authors to subfolder-safe user profiles" do

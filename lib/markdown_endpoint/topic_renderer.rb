@@ -18,6 +18,11 @@ module MarkdownEndpoint
       raise Discourse::NotFound if single_post? && posts.empty?
 
       buffer = String.new(header(posts.length))
+      unless single_post?
+        DiscoursePluginRegistry
+          .apply_modifier(:markdown_topic_header_sections, [], @topic_view, @guardian)
+          .each { |section| buffer << "\n\n" << section }
+      end
       posts.each_with_index do |post, index|
         buffer << (index.zero? ? "\n\n" : "\n\n---\n\n")
         buffer << render_post(post)
@@ -90,8 +95,32 @@ module MarkdownEndpoint
       )
       lines << metadata.join("\\\n")
       lines.concat(["", "</div>", ""])
+      if (description = action_description(post)).present?
+        lines.concat([description, ""])
+      end
       lines << cached_body(cooked, post_url: post.full_url)
       lines.join("\n")
+    end
+
+    def action_description(post)
+      return if post.action_code.blank?
+
+      serializer = PostSerializer.new(post, scope: @guardian, root: false)
+      serializer.topic_view = @topic_view
+      who = serializer.action_code_who
+      description =
+        I18n.t(
+          "js.action_codes.#{serializer.action_code}",
+          who: ERB::Util.html_escape(who.present? ? "@#{who}" : ""),
+          when:
+            ERB::Util.html_escape(
+              I18n.t("js.dates.wrap_on", date: @timestamp.text(post.created_at)),
+            ),
+          path: ERB::Util.html_escape(serializer.action_code_path || @topic.relative_url),
+          default: "",
+        )
+
+      escape_text(Nokogiri::HTML5.fragment(description).text.strip)
     end
 
     def cached_body(cooked, post_url:)
