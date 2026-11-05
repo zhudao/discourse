@@ -1318,15 +1318,58 @@ RSpec.describe UsersController do
         end
 
         it "does not create the developer as active" do
-          UsernameCheckerService.expects(:is_developer?).returns(true)
+          Rails.configuration.stubs(:developer_emails).returns([post_user_params[:email]])
 
           post "/u.json",
-               params: post_user_params.merge(active: true),
+               params: post_user_params.merge(password: "strongpassword12345", active: true),
                headers: {
                  HTTP_API_KEY: api_key.key,
                }
           expect(response.status).to eq(200)
-          expect(response.parsed_body["active"]).to be_falsy
+          expect(response.parsed_body["active"]).to eq(false)
+          expect(User.find_by_email(post_user_params[:email]).active).to eq(false)
+        end
+
+        it "does not activate a developer email with different case" do
+          Rails.configuration.stubs(:developer_emails).returns(["foobar@example.com"])
+
+          post "/u.json",
+               params:
+                 post_user_params.merge(
+                   email: "Foobar@example.com",
+                   password: "strongpassword12345",
+                   active: true,
+                 ),
+               headers: {
+                 HTTP_API_KEY: api_key.key,
+               }
+
+          expect(response.status).to eq(200)
+          expect(response.parsed_body["active"]).to eq(false)
+          new_user = User.find_by_email("foobar@example.com")
+          expect(new_user.active).to eq(false)
+          expect(new_user.admin).to eq(false)
+        end
+
+        it "does not activate a developer email with surrounding whitespace" do
+          Rails.configuration.stubs(:developer_emails).returns(["foobar@example.com"])
+
+          post "/u.json",
+               params:
+                 post_user_params.merge(
+                   email: " Foobar@example.com ",
+                   password: "strongpassword12345",
+                   active: true,
+                 ),
+               headers: {
+                 HTTP_API_KEY: api_key.key,
+               }
+
+          expect(response.status).to eq(200)
+          expect(response.parsed_body["active"]).to eq(false)
+          new_user = User.find_by_email("foobar@example.com")
+          expect(new_user.active).to eq(false)
+          expect(new_user.admin).to eq(false)
         end
 
         it "does not copy the administrator's locale to the new user" do
@@ -2428,6 +2471,28 @@ RSpec.describe UsersController do
     it "returns nothing when given an email param but no username" do
       get "/u/check_username.json", params: { email: "dood@example.com" }
       expect(response.status).to eq(200)
+    end
+
+    it "rejects an array email when checking username availability" do
+      SiteSetting.hide_email_address_taken = false
+      Rails.configuration.stubs(:developer_emails).returns(["dev@example.com"])
+
+      get "/u/check_username.json",
+          params: {
+            username: "someuser98767",
+            email: ["dev@example.com"],
+          }
+
+      expect(response.status).to eq(400)
+    end
+
+    it "allows an empty email when checking username availability" do
+      SiteSetting.hide_email_address_taken = false
+
+      get "/u/check_username.json", params: { username: "someuser98767", email: "" }
+
+      expect(response.status).to eq(200)
+      expect(response.parsed_body).to include("available" => true, "is_developer" => false)
     end
 
     context "when username is available" do
@@ -4493,9 +4558,8 @@ RSpec.describe UsersController do
         SiteSetting.selectable_avatars_mode = "no_one"
       end
 
-      %i[auth_overrides_avatar discourse_connect_overrides_avatar].each do |setting|
-        it "rejects preset selection when #{setting} is enabled" do
-          SiteSetting.public_send("#{setting}=", true)
+      shared_examples "protecting an externally controlled avatar from preset selection" do
+        it "rejects preset selection and preserves the existing avatar" do
           user1.update!(uploaded_avatar_id: avatar2.id)
 
           put "/u/#{user1.username}/preferences/avatar/select.json", params: { url: avatar1.url }
@@ -4503,6 +4567,18 @@ RSpec.describe UsersController do
           expect(response).to be_unprocessable
           expect(user1.reload.uploaded_avatar_id).to eq(avatar2.id)
         end
+      end
+
+      context "with auth_overrides_avatar enabled" do
+        before { SiteSetting.auth_overrides_avatar = true }
+
+        include_examples "protecting an externally controlled avatar from preset selection"
+      end
+
+      context "with discourse_connect_overrides_avatar enabled" do
+        before { SiteSetting.discourse_connect_overrides_avatar = true }
+
+        include_examples "protecting an externally controlled avatar from preset selection"
       end
 
       it "raises an error when url is blank" do
