@@ -260,6 +260,14 @@ RSpec.describe Email::Receiver do
       expect(Topic.last.title).to eq("This topic needs a title")
     end
 
+    it "rejects email from a suspended sender" do
+      Fabricate(:user, email: "one@foo.com", suspended_till: 1.year.from_now)
+
+      expect { process(:email_reply_1) }.to raise_error(
+        Email::Receiver::SuspendedUserError,
+      ).and not_change(Topic, :count)
+    end
+
     context "with reply_by_email configured" do
       before { configure_reply_by_email }
 
@@ -1131,6 +1139,43 @@ RSpec.describe Email::Receiver do
         expect { process(:new_user) }.to change(Topic, :count)
         expect(Topic.last.user.email).to eq("discourse@bar.com")
       end
+    end
+  end
+
+  describe "HTML email with many line breaks inside inline elements" do
+    fab!(:category) do
+      Fabricate(:category, email_in: "category@bar.com", email_in_allow_strangers: true)
+    end
+
+    def raw_html_email(html)
+      <<~EMAIL
+        Return-Path: <stranger@example.com>
+        From: stranger@example.com
+        To: category@bar.com
+        Subject: Line breaks inside inline elements
+        Date: Fri, 15 Jan 2016 00:12:43 +0100
+        Message-ID: <#{SecureRandom.hex}@example.com>
+        MIME-Version: 1.0
+        Content-Type: text/html; charset=UTF-8
+
+        <html><body>#{html}</body></html>
+      EMAIL
+    end
+
+    it "processes deeply nested inline elements without stalling the mail worker" do
+      html = "<div>#{"a<br>b<br>c<br>d<span>" * 100}x#{"</span>" * 100}</div>"
+
+      expect {
+        Timeout.timeout(10) { Email::Receiver.new(raw_html_email(html)).process! }
+      }.to change(Topic, :count).by(1)
+    end
+
+    it "processes a wide inline element without stalling the mail worker" do
+      html = "<div><span>#{"a<br>" * 10_000}</span></div>"
+
+      expect {
+        Timeout.timeout(10) { Email::Receiver.new(raw_html_email(html)).process! }
+      }.to change(Topic, :count).by(1)
     end
   end
 

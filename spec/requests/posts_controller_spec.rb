@@ -1300,6 +1300,23 @@ RSpec.describe PostsController do
       expect(post.topic.reload.category_id).not_to eq(category.id)
     end
 
+    it "does not let a moderator move a topic to a category they cannot see" do
+      post = create_post
+      private_category = Fabricate(:private_category, group: Fabricate(:group))
+      sign_in(moderator)
+
+      put "/posts/#{post.id}.json",
+          params: {
+            post: {
+              category_id: private_category.id,
+              raw: "this is a test edit to post",
+            },
+          }
+
+      expect(response.status).to eq(403)
+      expect(post.topic.reload.category_id).not_to eq(private_category.id)
+    end
+
     describe "trying to add a link without permission" do
       it "returns an error message if links are added to posts when not allowed" do
         post = create_post
@@ -1620,6 +1637,24 @@ RSpec.describe PostsController do
     before do
       SiteSetting.fast_typing_threshold = "disabled"
       SiteSetting.whispers_allowed_groups = "#{Group::AUTO_GROUPS[:staff]}"
+    end
+
+    it "does not spend quadratic time cooking a post full of unclosed bbcode tags" do
+      # A TL0 user can submit a post (well within max_post_length) whose server
+      # side cooking is quadratic in its length, tying up the web worker for
+      # several seconds regardless of whether the post is ultimately accepted.
+      sign_in(user_trust_level_0)
+      PrettyText.cook("warm up the v8 context")
+
+      raw = (["[quote]"] * 2000).join("\n")
+
+      elapsed =
+        Benchmark.realtime do
+          post "/posts.json", params: { raw: raw, title: "a perfectly ordinary topic title" }
+        end
+
+      expect(response.status).to be_between(200, 499)
+      expect(elapsed).to be < 2
     end
 
     it "prevents regular users from publishing a global banner while creating a topic" do
@@ -4765,6 +4800,63 @@ RSpec.describe PostsController do
             get "/raw/#{topic.id}"
             expect(response.body).to include("visible post content", "hidden post content")
           end
+        end
+      end
+    end
+  end
+
+  describe "noindex on raw post text" do
+    fab!(:unlisted_topic) { Fabricate(:topic, visible: false) }
+    fab!(:unlisted_post) { Fabricate(:post, topic: unlisted_topic, raw: "unlisted body") }
+    fab!(:listed_post) { Fabricate(:post, topic: topic, raw: "listed body") }
+
+    before do
+      SiteSetting.edit_history_visible_to_public = true
+      SiteSetting.editing_grace_period = 0
+      unlisted_post.revise(unlisted_post.user, raw: "unlisted body, edited")
+      listed_post.revise(listed_post.user, raw: "listed body, edited")
+    end
+
+    def raw_paths(post)
+      [
+        "/raw/#{post.topic_id}",
+        "/raw/#{post.topic_id}/#{post.post_number}",
+        "/raw/#{post.topic_id}/#{post.post_number}?revision=2",
+        "/posts/#{post.id}/raw",
+      ]
+    end
+
+    it "follows the topic's noindex decision, as the topic page does" do
+      raw_paths(unlisted_post).each do |path|
+        get path
+
+        expect(response).to have_http_status(:ok), path
+        expect(response.headers["X-Robots-Tag"]).to eq("noindex"), path
+      end
+
+      raw_paths(listed_post).each do |path|
+        get path
+
+        expect(response).to have_http_status(:ok), path
+        expect(response.headers["X-Robots-Tag"]).to be_nil, path
+      end
+    end
+
+    context "with a topic_noindex modifier" do
+      let(:plugin) { Plugin::Instance.new }
+      let(:modifier) do
+        Proc.new { |noindex, modifier_topic| noindex || modifier_topic.id == topic.id }
+      end
+
+      before { DiscoursePluginRegistry.register_modifier(plugin, :topic_noindex, &modifier) }
+      after { DiscoursePluginRegistry.unregister_modifier(plugin, :topic_noindex, &modifier) }
+
+      it "keeps the raw text of a listed topic out of search engines too" do
+        raw_paths(listed_post).each do |path|
+          get path
+
+          expect(response).to have_http_status(:ok), path
+          expect(response.headers["X-Robots-Tag"]).to eq("noindex"), path
         end
       end
     end

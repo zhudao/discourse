@@ -37,6 +37,9 @@ module Email
     class InactiveUserError < ProcessingError
     end
 
+    class SuspendedUserError < ProcessingError
+    end
+
     class SilencedUserError < ProcessingError
     end
 
@@ -106,6 +109,7 @@ module Email
     attr_reader :raw_email
     attr_reader :mail
     attr_reader :message_id
+    attr_reader :from_email
 
     COMMON_ENCODINGS = [-"utf-8", -"windows-1252", -"iso-8859-1"]
 
@@ -346,6 +350,7 @@ module Email
       @incoming_email.update_columns(user_id: user.id)
 
       raise InactiveUserError if !user.active && !user.staged
+      raise SuspendedUserError if user.suspended?
       raise SilencedUserError if user.silenced?
     end
 
