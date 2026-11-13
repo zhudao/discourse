@@ -1613,6 +1613,12 @@ RSpec.describe PrettyText do
       expect(PrettyText.cook("*️⃣")).to match(/\:asterisk\:/)
     end
 
+    it "renders adjacent multi-codepoint emoji" do
+      england_flag = [0x1F3F4, 0xE0067, 0xE0062, 0xE0065, 0xE006E, 0xE0067, 0xE007F].pack("U*")
+
+      expect(PrettyText.cook(england_flag * 2).scan('title=":england:"').size).to eq(2)
+    end
+
     it "doesn't replace unicode emoji if emoji is disabled" do
       SiteSetting.enable_emoji = false
       expect(PrettyText.cook("💣")).not_to match(/\:bomb\:/)
@@ -3251,6 +3257,14 @@ HTML
     it "cooks many unclosed replace-style inline bbcode tags in roughly linear time" do
       raw = "[code]" * 6000
       expect(cook_duration(raw)).to be < 2
+    end
+
+    it "cooks whitespace-heavy unclosed quote and details tags quickly" do
+      %w[quote details].each do |tag|
+        raw = "[#{tag}=#{" " * 31_000} no closing bracket"
+
+        expect(cook_duration(raw)).to be < 2
+      end
     end
   end
 end

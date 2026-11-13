@@ -2275,7 +2275,11 @@ CREATE TABLE public.blog_publications (
     last_published_at timestamp(6) without time zone,
     schedule_token character varying,
     schedule_error text DEFAULT ''::text NOT NULL,
-    draft_metadata jsonb DEFAULT '{}'::jsonb NOT NULL
+    draft_metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
+    cooked text,
+    image_url text,
+    meta_description character varying DEFAULT ''::character varying NOT NULL,
+    canonical_url character varying DEFAULT ''::character varying NOT NULL
 );
 
 
@@ -26644,6 +26648,9 @@ ALTER TABLE ONLY public.ad_plugin_house_ads_groups
 SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
+('20261112150235'),
+('20261110093228'),
+('20261110093224'),
 ('20261109060019'),
 ('20261106020035'),
 ('20261105165644'),
