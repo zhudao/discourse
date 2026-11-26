@@ -158,23 +158,6 @@ CREATE FUNCTION discourse_functions.raise_topic_timers_topic_id_readonly() RETUR
 $$;
 
 
---
--- Name: skip_piggyback_browser_pageview_events(); Type: FUNCTION; Schema: discourse_functions; Owner: -
---
-
-CREATE FUNCTION discourse_functions.skip_piggyback_browser_pageview_events() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-BEGIN
-  IF NEW.source = 1 THEN
-    RETURN NULL;
-  END IF;
-
-  RETURN NEW;
-END;
-$$;
-
-
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
@@ -976,7 +959,8 @@ CREATE TABLE public.ai_post_image_captions (
     last_attempted_at timestamp(6) without time zone,
     last_error text,
     created_at timestamp(6) without time zone NOT NULL,
-    updated_at timestamp(6) without time zone NOT NULL
+    updated_at timestamp(6) without time zone NOT NULL,
+    source character varying DEFAULT 'unknown'::character varying NOT NULL
 );
 
 
@@ -2750,7 +2734,6 @@ CREATE TABLE public.browser_pageview_events (
     score integer,
     normalized_referrer character varying(2000),
     normalized_referrer_version smallint,
-    source smallint DEFAULT 2 NOT NULL,
     normalized_url character varying(2000),
     normalized_url_version integer,
     browser smallint,
@@ -20277,6 +20260,13 @@ CREATE INDEX idx_ai_api_audit_logs_user_id_id ON public.ai_api_audit_logs USING 
 
 
 --
+-- Name: idx_ai_api_audit_logs_workflow_usage; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ai_api_audit_logs_workflow_usage ON public.ai_api_audit_logs USING btree (((feature_context ->> 'workflow_id'::text)), created_at) WHERE ((feature_name)::text = ANY ((ARRAY['workflow'::character varying, 'context_compression'::character varying])::text[]));
+
+
+--
 -- Name: idx_ai_bot_conversation_stars_topic_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -20389,10 +20379,10 @@ CREATE INDEX idx_bpe_created_at_id ON public.browser_pageview_events USING btree
 
 
 --
--- Name: idx_bpe_created_at_session_id; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_bpe_created_at_session; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_bpe_created_at_session_id ON public.browser_pageview_events USING btree (created_at, session_id, source);
+CREATE INDEX idx_bpe_created_at_session ON public.browser_pageview_events USING btree (created_at, session_id);
 
 
 --
@@ -26661,13 +26651,6 @@ CREATE TRIGGER discourse_rss_polling_rss_feeds_author_readonly BEFORE INSERT OR 
 
 
 --
--- Name: browser_pageview_events skip_piggyback_browser_pageview_events; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER skip_piggyback_browser_pageview_events BEFORE INSERT OR UPDATE OF source ON public.browser_pageview_events FOR EACH ROW WHEN ((new.source = ANY (ARRAY[1, 2]))) EXECUTE FUNCTION discourse_functions.skip_piggyback_browser_pageview_events();
-
-
---
 -- Name: topic_timers topic_timers_topic_id_readonly; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -26961,6 +26944,8 @@ ALTER TABLE ONLY public.ad_plugin_house_ads_groups
 SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
+('20261125161827'),
+('20261124234323'),
 ('20261124173030'),
 ('20261124170000'),
 ('20261124152608'),
@@ -26970,6 +26955,9 @@ INSERT INTO "schema_migrations" (version) VALUES
 ('20261124013638'),
 ('20261123182523'),
 ('20261123103548'),
+('20261123051323'),
+('20261123051317'),
+('20261123051155'),
 ('20261123031254'),
 ('20261123030923'),
 ('20261123011249'),

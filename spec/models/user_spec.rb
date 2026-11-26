@@ -2015,6 +2015,20 @@ RSpec.describe User do
         user.user_visits.where(visited_at: date).count
       }
     end
+
+    it "marks an existing desktop visit as mobile" do
+      user.update_visit_record!(date)
+      user.update_visit_record!(date, mobile: true)
+
+      expect(user.visit_record_for(date).mobile).to eq(true)
+    end
+
+    it "does not mark an existing mobile visit as desktop" do
+      user.update_visit_record!(date, mobile: true)
+      user.update_visit_record!(date)
+
+      expect(user.visit_record_for(date).mobile).to eq(true)
+    end
   end
 
   describe "email_confirmed?" do
@@ -3243,6 +3257,33 @@ RSpec.describe User do
 
       expect(message.data[:unread_notifications]).to eq(1)
       expect(message.data[:unread_high_priority_notifications]).to eq(2)
+    end
+
+    it "does not publish a reviewable mention the user can no longer access" do
+      SiteSetting.enable_mentions = true
+      moderator = Fabricate(:moderator, last_seen_at: Time.zone.now)
+      reviewable = Fabricate(:reviewable_flagged_post)
+      ReviewableNote.create!(
+        reviewable:,
+        user: Fabricate(:admin),
+        content: "@#{moderator.username}",
+      )
+      mention = moderator.notifications.find_by!(notification_type: Notification.types[:mentioned])
+
+      publish_last_notification = -> do
+        MessageBus
+          .track_publish("/notification/#{moderator.id}") { moderator.publish_notifications_state }
+          .first
+          .data[
+          :last_notification
+        ]
+      end
+
+      expect(publish_last_notification.call[:notification][:id]).to eq(mention.id)
+
+      reviewable.update!(reviewable_by_moderator: false)
+
+      expect(publish_last_notification.call).to be_nil
     end
 
     it "does not publish to the /notification channel for users who have not been seen in > 30 days" do

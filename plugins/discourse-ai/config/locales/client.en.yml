@@ -372,11 +372,19 @@ en:
         error: "Error"
         response: "Response"
       post_image_captions:
-        edit: "Edit AI image caption"
-        title: "Edit AI image caption"
-        description: "Caption"
-        save: "Save caption"
         saved: "AI image caption saved"
+        image_descriptions:
+          title: "Image descriptions"
+          alt: "Alt text"
+          alt_updated: "Alt text updated in the draft."
+          alt_read_only: "Alt text cannot be edited from this preview."
+          alt_not_updated: "Alt text was not updated because the image changed. Reopen Image descriptions to try again."
+          ai: "AI description"
+          loading: "Loading the AI description…"
+          load_failed: "Could not load the AI description."
+          not_supported: "No AI description is available for this image."
+          pending: "Not available yet. AI descriptions are generated after posting."
+          apply: "Apply"
       discourse_workflows:
         ai_agent:
           agent_id: "Agent"
@@ -627,6 +635,7 @@ en:
           deduplicate_concepts: "Concepts deduplication"
           setting_groups:
             settings: "Basic Settings"
+            seeding_and_backfill: "Seeding and backfill"
             topic_criteria: "Topic Criteria"
             post_criteria: "Post Criteria"
             agents: "Agents"
@@ -963,6 +972,8 @@ en:
         credits_remaining: "Credits remaining"
         models_breakdown: "Usage per model"
         users_breakdown: "Usage per user"
+        workflows_breakdown: "Usage per workflow"
+        workflow: "Workflow"
         all_features: "All features"
         all_models: "All models"
         username: "Username"
@@ -1042,6 +1053,8 @@ en:
         topic_short: "Topic %{id}"
         post: "Post"
         post_short: "Post %{id}"
+        workflow: "Workflow"
+        workflow_link: "Workflow: %{name}"
         duration: "Duration"
         tokens_direction: "Tokens (in → out)"
         first_token: "First token"
@@ -1422,6 +1435,14 @@ en:
         no_results: "No concepts match these filters."
         clear_filters: "Clear filters"
         empty: "No inferred concepts yet"
+        empty_description: "Inferred concepts automatically discover recurring themes from your community's discussions. Start an initial seed to analyze a sample of popular topics across categories and build your first taxonomy, or create concepts manually."
+        seed:
+          action: "Seed concepts"
+          enqueued: "Concept seeding queued to run in the background."
+          queued: "Concept seeding is queued to run in the background."
+          running_progress: "Seeding concepts in the background (%{processed} / %{total} topics processed)."
+          failed: "The previous concept seeding run failed. You can try again."
+          refresh: "Refresh"
         load_more: "Load more"
         saved: "Concept saved"
         confirm_delete: "Delete \"%{name}\"? Its topic and post associations will be removed."
@@ -1462,7 +1483,18 @@ en:
           parent: "Parent concept"
           parent_none: "None (top-level)"
         children: "Sub-concepts"
+        neighbor_concepts: "Neighbor concepts"
+        neighbor_concepts_description: "Closest concepts by embedding similarity."
+        no_neighbor_concepts: "No similar concepts found yet. Embeddings may still be generating."
+        co_occurring_concepts: "Co-occurring concepts"
+        co_occurring_concepts_description: "Concepts that share the most topics with this one."
+        no_co_occurring_concepts: "No other concepts share topics with this one yet."
+        shared_topics_count:
+          one: "%{count} topic"
+          other: "%{count} topics"
         tagged_topics: "Tagged topics"
+        tagged_topics_count: "Tagged topics (%{count})"
+        showing_top_topics: "Showing top %{shown} of %{total} visible topics."
         no_tagged_topics: "No visible public topics are tagged with this concept yet."
         topic_columns:
           topic: "Topic"
@@ -1988,6 +2020,7 @@ en:
           suffix: "in all topics and posts with AI"
 
       ai_artifact:
+        move_warning: "If you move a post with a live artifact, this conversation’s public share will no longer give access to that artifact. Share or update the destination conversation to give public access again. Separate shared snapshots are not affected."
         editor:
           title: "AI artifact"
           edit_options: "Edit options"
