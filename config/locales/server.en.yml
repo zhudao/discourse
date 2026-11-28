@@ -207,23 +207,59 @@ en:
       user_not_found: "User not found"
       user_update_required: "Provide at least one profile field to update"
     oauth:
-      authorize_title: "Authorize MCP client"
-      client_request: "%{client_name} is requesting access to %{site_name}."
-      client_id: "Client ID"
-      redirect_uri: "Redirect URI"
+      # %{client_name} is the name of the app asking for access.
+      page_title: 'Authorize "%{client_name}" - %{site_name}'
+      authorize_title_html: 'Authorize "%{client_name}"'
+      logged_in_as: "Logged in as"
+      unverified_client: '"%{client_name}" registered itself when it connected, so its name isn''t verified. Only authorize it if you just asked an app to connect to this site.'
+      permissions_header_html: 'This will allow "%{client_name}" to:'
+      scope_sections:
+        member: "Use the site as you"
+        manage: "Manage the site"
+      withheld_permissions:
+        one: "%{count} requested permission won't be granted"
+        other: "%{count} requested permissions won't be granted"
+      withheld_explanation: "Your account can't give these permissions, so some of the app's features may not work."
+      acts_as_you: "The app acts as you, so it can only do what your account can do. Anything it reads through this connection is sent to it."
+      # %{host} is the website, or the address of an app on this device, that authorizing opens.
+      redirect_html: "Authorizing will redirect you to %{host}."
+      redirect_local_html: "Authorizing will redirect you to an app on this device (%{host})."
+      app_details: "App details"
+      client_id: "App ID"
+      redirect_url: "Redirect URL"
       resource: "MCP server"
-      requested_permission_count:
-        one: "%{client_name} requested %{count} permission."
-        other: "%{client_name} requested %{count} permissions."
-      eligible_permission_count:
-        one: "Your account is eligible for %{count}."
-        other: "Your account is eligible for %{count}."
-      granted_permissions:
-        one: "The following permission will be granted"
-        other: "The following permissions will be granted"
-      guardian_notice: "The client acts as your account and remains subject to your normal Discourse permissions."
-      deny: "Deny"
+      scope_ids: "Scopes"
       approve: "Authorize"
+      cancel: "Cancel"
+      disconnect_html: 'You can disconnect the app at any time from <a href="%{url}">MCP Apps</a> in your security preferences.'
+      # Each completes the sentence "This will allow "App" to:".
+      scopes:
+        mcp_profile_read: "See your username and profile"
+        mcp_profile_write: "Update your profile"
+        mcp_content_read: "Read and search topics, posts, and profiles, plus your notifications and bookmarks"
+        mcp_content_write: "Create and edit topics and posts, delete your posts, and upload files"
+        mcp_private_messages_read: "Read your personal messages"
+        mcp_private_messages_write: "Send personal messages and add people to them"
+        mcp_drafts_read: "Read your drafts"
+        mcp_drafts_write: "Save and delete your drafts"
+        mcp_groups_read: "See groups, their members, and membership requests"
+        mcp_groups_write: "Create, edit, and delete groups, and manage their members"
+        mcp_repository_read: "Read Discourse's source code and authoring guides"
+        mcp_site_settings_read: "See site settings"
+        mcp_site_settings_write: "Change site settings"
+        mcp_themes_read: "See themes and theme components"
+        mcp_themes_write: "Install, edit, and delete themes, including their code"
+        mcp_categories_read: "See category settings"
+        mcp_categories_write: "Create, edit, and delete categories"
+        mcp_tag_groups_read: "See tag groups"
+        mcp_tag_groups_write: "Create, edit, and delete tag groups"
+        mcp_users_read: "List and filter users, as staff see them"
+        mcp_users_write: "Create users, and activate, approve, or deactivate accounts"
+        mcp_moderation_read: "See the review queue and moderation history"
+        mcp_moderation_write: "Act on flagged posts, suspend or silence users, and close or pin topics"
+        mcp_reports_read: "See site reports"
+        mcp_webhooks_read: "See webhooks and their delivery history"
+        mcp_webhooks_write: "Create, edit, and delete webhooks, which send site data to other services"
     admin:
       site_enabled: "Enable the MCP server site setting"
       primitives_enabled: "Enable at least one primitive in Capabilities"
@@ -1462,9 +1498,10 @@ en:
     email_change_not_allowed: "This account has been active before, so it can only be reactivated using its current email address."
     email_change_not_allowed_after_invite: "This account has accepted an invitation, so it can only be activated using its current email address."
     admin_confirm:
-      title: "Confirm Admin Account"
+      title: "Confirm admin account"
       description: "Are you sure you want <b>%{target_username} (%{target_email})</b> to be an administrator?"
-      grant: "Grant Admin Access"
+      grant: "Grant admin access"
+      cancel: "Cancel"
       complete: "<b>%{target_username}</b> is now an administrator."
       back_to: "Return to %{title}"
   reviewable_score_types:
@@ -1616,7 +1653,7 @@ en:
     different_user_description: "You are currently logged in as a different user than the one we emailed. Please log out, or enter anonymous mode, and try again."
     not_found_description: "Sorry, we couldn't find that subscription. It's possible the link in your email is too old and has expired?"
     user_not_found_description: "Sorry, we couldn't find a user for this subscription. You are probably attempting to unsubscribe an account that no longer exists."
-    log_out: "Log Out"
+    log_out: "Log out"
     submit: "Save preferences"
     digest_frequency:
       title: "You are receiving summary emails %{frequency}"
@@ -1653,7 +1690,7 @@ en:
     otp_confirmation:
       confirm_title: Continue to %{site_name}
       logging_in_as: Logging in as %{username}
-      confirm_button: Finish Login
+      confirm_button: "Finish logging in"
     no_trust_level: "Sorry, you do not have the required trust level to access the user API"
     generic_error: "Sorry, we are unable to issue user API keys, this feature may be disabled by the site admin"
     scopes:
@@ -3183,6 +3220,7 @@ en:
     mcp_cache_ttl_ms: "How long MCP clients may consider a cacheable response fresh, in milliseconds. Set to 0 to make responses immediately stale."
     mcp_oauth_client_id_metadata_policy: "Choose whether OAuth clients can register using Client ID Metadata Documents (CIMD). Admin-registered clients are always allowed. Users must still approve requested access."
     mcp_oauth_client_id_metadata_domains: "Hosts allowed to provide Client ID Metadata Documents when {{setting:mcp_oauth_client_id_metadata_policy}} is set to approved domains. Subdomains are not included unless listed separately."
+    mcp_oauth_dynamic_client_registration: "Let apps register themselves through OAuth dynamic client registration when they first connect. Some AI apps need this because they can't use a Client ID Metadata Document. An app that registers this way isn't verified, so the approval page says so. Only applies when {{setting:mcp_oauth_client_id_metadata_policy}} allows any domain."
     mcp_access_token_lifetime_minutes: "How long an MCP access token remains valid, in minutes."
     mcp_refresh_token_lifetime_days: "How long an MCP refresh token family remains valid, in days."
     mcp_authorization_code_lifetime_seconds: "How long a single-use MCP OAuth authorization code remains valid, in seconds."
@@ -3647,7 +3685,7 @@ en:
       exclude_locale: "Exclude topics originally written in a specific language"
 
   discourse_connect:
-    login_error: "Login Error"
+    login_error: "Login error"
     not_found: "Your account couldn't be found. Please contact the site's administrator."
     account_not_approved: "Your account is pending approval. You will receive an email notification when you are approved."
     unknown_error: "There is a problem with your account. Please contact the site's administrator."
@@ -6118,10 +6156,12 @@ en:
     badge_title_metadata: "%{display_name} badge on %{site_title}"
 
   admin_login:
+    title: "Admin login"
+    description: "Enter the email address of your admin account, and we'll email you a link to log in."
     acknowledgement: "If an admin account with the email address %{email} exists, you will receive an email with a link to log in."
-    email_input: "Admin Email"
-    submit_button: "Send Email"
-    safe_mode: "Safe Mode: disable all themes/plugins when logging in"
+    email_input: "Admin email"
+    submit_button: "Send email"
+    safe_mode: "Safe mode: disable all themes and plugins when logging in"
 
   performance_report:
     initial_post_raw: This topic includes daily performance reports for your site.
@@ -6223,7 +6263,7 @@ en:
     no_plugins: "Disable all client-side plugin customizations"
     deprecation_error_description: "To check for compatibility with upcoming Discourse updates, you can make Javascript deprecations raise an error:"
     deprecation_error_label: Make Javascript deprecations raise an error
-    enter: "Enter Safe Mode"
+    enter: "Enter safe mode"
     must_select: "You must select at least one option to enter safe mode."
   dev_mode:
     title: "Developer Mode"
